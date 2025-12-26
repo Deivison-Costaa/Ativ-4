@@ -50,7 +50,7 @@ go run . .\tests\input.ec1
 Use `-` como nome do arquivo:
 
 ```powershell
-@'(33 + (912 * 11))'@ | go run . -
+'(33 + (912 * 11))' | go run . -
 ```
 
 ## Exemplos prontos (script)
