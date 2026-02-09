@@ -34,7 +34,7 @@ func (cg *CodeGenerator) Generate(exp Exp) string {
 	cg.emit("  call imprime_num")
 	cg.emit("  call sair")
 	cg.emit("")
-	cg.emit(".include \"runtime.s\"")
+	cg.emit(".include \"runtime/runtime.s\"")
 
 	return cg.builder.String()
 }
