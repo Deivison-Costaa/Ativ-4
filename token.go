@@ -3,6 +3,7 @@ package main
 type TokenType string
 
 const (
+	TokenEOF      TokenType = "EOF"
 	TokenNumero   TokenType = "Numero"
 	TokenParenEsq TokenType = "ParenEsq"
 	TokenParenDir TokenType = "ParenDir"
