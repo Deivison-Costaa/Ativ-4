@@ -54,7 +54,7 @@ echo "(6 * 7)" | ./ec1 -o saida.s -
 ### Montar e executar o programa
 
 ```bash
-# Montar (a partir do diretório onde está o runtime.s)
+# Montar (a partir do diretório raiz do projeto, onde está runtime/)
 as -o programa.o programa.s
 
 # Linkar
@@ -118,7 +118,7 @@ _start:
   call imprime_num
   call sair
 
-.include "runtime.s"
+.include "runtime/runtime.s"
 ```
 
 ## Arquivos
@@ -129,7 +129,7 @@ _start:
 - `parser.go` - Analisador sintático
 - `codegen.go` - Gerador de código assembly
 - `main.go` - Programa principal
-- `runtime.s` - Funções auxiliares (imprime_num, sair)
+- `runtime/runtime.s` - Funções auxiliares (imprime_num, sair)
 - `run_tests.sh` - Script de testes automatizados
 
 ## Testes
