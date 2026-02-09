@@ -4,30 +4,39 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 Set-Location $here
 
-@'
-(33 + (912 * 11))
-'@ | Set-Content -NoNewline -Encoding ascii input.ec1
+Write-Host '== tests\input.ec1 ==' 
+& go run . .\tests\input.ec1
 
-@'
-(  3	+
-(4+5) )
-'@ | Set-Content -NoNewline -Encoding ascii ws.ec1
+Write-Host '== tests\ws.ec1 ==' 
+& go run . .\tests\ws.ec1
 
-@'
-(3 + a)
-'@ | Set-Content -NoNewline -Encoding ascii err.ec1
+Write-Host '== tests\input2.ec1 ==' 
+& go run . .\tests\input2.ec1
 
-Write-Host '== input.ec1 ==' 
-& go run . input.ec1
+Write-Host '== tests\input3.ec1 ==' 
+& go run . .\tests\input3.ec1
 
-Write-Host '== ws.ec1 ==' 
-& go run . ws.ec1
-
-Write-Host '== err.ec1 (expected error) ==' 
+Write-Host '== tests\err.ec1 (expected lexical error) ==' 
 try {
-  & go run . err.ec1
+  & go run . .\tests\err.ec1
   exit 1
 } catch {
   # go run returns non-zero, so PowerShell throws.
+  Write-Host $_.Exception.Message
+}
+
+Write-Host '== tests\synerr.ec1 (expected syntax error) ==' 
+try {
+  & go run . .\tests\synerr.ec1
+  exit 1
+} catch {
+  Write-Host $_.Exception.Message
+}
+
+Write-Host '== tests\err1.ec1 (expected runtime error) ==' 
+try {
+  & go run . .\tests\err1.ec1
+  exit 1
+} catch {
   Write-Host $_.Exception.Message
 }
