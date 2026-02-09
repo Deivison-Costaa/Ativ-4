@@ -54,7 +54,7 @@ func (l *Lexer) NextToken() (Token, error) {
 		}
 	}
 
-	return Token{}, nil
+	return Token{Type: TokenEOF, Lexeme: "", Pos: l.pos}, nil
 }
 
 func isWhitespace(c byte) bool {

@@ -10,7 +10,7 @@ func tokensFrom(input string) ([]Token, error) {
 		if err != nil {
 			return nil, err
 		}
-		if tok.Type == "" {
+		if tok.Type == TokenEOF {
 			return out, nil
 		}
 		out = append(out, tok)
@@ -82,5 +82,38 @@ func TestLexicalErrorPosition(t *testing.T) {
 	}
 	if err.Error() != "Erro lexico na posicao 5" {
 		t.Fatalf("unexpected error: %q", err.Error())
+	}
+}
+
+func TestEmptyInput(t *testing.T) {
+	toks, err := tokensFrom("")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(toks) != 0 {
+		t.Fatalf("token count: got %d want %d", len(toks), 0)
+	}
+}
+
+func TestInvalidCharacterAtStart(t *testing.T) {
+	_, err := tokensFrom("x")
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if err.Error() != "Erro lexico na posicao 0" {
+		t.Fatalf("unexpected error: %q", err.Error())
+	}
+}
+
+func TestNumberTokenPosition(t *testing.T) {
+	toks, err := tokensFrom("  123")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(toks) != 1 {
+		t.Fatalf("token count: got %d want %d", len(toks), 1)
+	}
+	if toks[0].Type != TokenNumero || toks[0].Lexeme != "123" || toks[0].Pos != 2 {
+		t.Fatalf("token: got %+v want %+v", toks[0], Token{Type: TokenNumero, Lexeme: "123", Pos: 2})
 	}
 }
