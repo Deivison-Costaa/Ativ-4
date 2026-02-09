@@ -1,76 +1,161 @@
-# Atividade 04 — EC1 (Expressões Constantes 1) — Análise Léxica
+# Atividade 07 — EC1 (Expressões Constantes 1) — Compilador
 
-Este projeto implementa um **analisador léxico** para a linguagem **EC1**.
+Este projeto implementa um **compilador completo** para a linguagem **EC1**, gerando código **assembly x86-64** para Linux.
 
-A linguagem EC1 consiste em expressões aritméticas com operandos inteiros constantes e operadores `+`, `-`, `*`, `/`, com operações sempre entre parênteses.
+## Componentes
 
-## O que o programa faz
+- **Análise léxica** (scanner) — produz tokens
+- **Análise sintática descendente recursiva** (parser) — produz uma **árvore de sintaxe abstrata (AST)**
+- **Geração de código** — gera assembly x86-64 usando pilha para armazenamento de valores intermediários
 
-Dado um arquivo com um programa EC1, o analisador léxico:
+## Linguagem EC1
 
-- Ignora espaços em branco (` `, `\t`, `\n`, `\r`).
-- Reconhece e gera tokens para:
-  - `Numero` (sequência de um ou mais dígitos)
-  - `ParenEsq` `(`
-  - `ParenDir` `)`
-  - `Soma` `+`
-  - `Sub` `-`
-  - `Mult` `*`
-  - `Div` `/`
-- Imprime cada token no formato:
+Um programa EC1 é uma expressão aritmética com literais inteiros e operadores `+`, `-`, `*`, `/`.
+
+A gramática é:
 
 ```text
-<Tipo, "lexema", posicao>
+<programa> ::= <expressao>
+<expressao> ::= <literal-inteiro> | '(' <expressao> <operador> <expressao> ')'
+<operador> ::= '+' | '-' | '*' | '/'
+<literal-inteiro> ::= <digito>+
 ```
 
-Onde `posicao` é o índice do caractere inicial do token na entrada.
-
-## Erros léxicos
-
-Se existir algum caractere fora do conjunto de dígitos, parênteses e operadores, o programa reporta erro no **stderr** e termina com código `1`:
-
-```text
-Erro lexico na posicao X
+Exemplos de programas EC1:
+```
+333
+(6 * 7)
+(3 + (4 + (11 + 7)))
+(33 + (912 * 11))
+((427 / 7) + (11 * (231 + 5)))
 ```
 
-Obs.: a mensagem foi mantida **sem acentos** para evitar problemas de encoding no Windows/PowerShell.
+## Como usar
 
-## Como executar (Windows / PowerShell)
+### Compilar o compilador EC1
 
-Na pasta `Ativ 4`:
-
-### Executar lendo de um arquivo
-
-```powershell
-go run . .\tests\input.ec1
+```bash
+go build -o ec1 *.go
 ```
 
-### Executar lendo do stdin
+### Compilar um programa EC1
 
-Use `-` como nome do arquivo:
+```bash
+# Gera arquivo .s a partir do .ec1
+./ec1 programa.ec1
 
-```powershell
-@'(33 + (912 * 11))'@ | go run . -
+# Ou especifica arquivo de saída
+./ec1 -o saida.s programa.ec1
+
+# Ou lê do stdin e imprime na stdout
+echo "(6 * 7)" | ./ec1 -o saida.s -
 ```
 
-## Exemplos prontos (script)
+### Montar e executar o programa
 
-Existe um script que cria alguns arquivos de entrada e executa o programa, imprimindo a saída no terminal:
+```bash
+# Montar (a partir do diretório onde está o runtime.s)
+as -o programa.o programa.s
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\run_examples.ps1
+# Linkar
+ld -o programa programa.o
+
+# Executar
+./programa
 ```
+
+### Exemplo completo
+
+```bash
+# Compilar EC1 → Assembly
+./ec1 tests/input.ec1
+
+# Montar e linkar
+as -o tests/input.o tests/input.s
+ld -o tests/input tests/input.o
+
+# Executar
+./tests/input
+# Saída: 10065
+```
+
+## Geração de Código
+
+O compilador usa o seguinte esquema de tradução:
+
+### Constante
+```asm
+mov $valor, %rax
+```
+
+### Operação Binária
+1. Gerar código para operando direito
+2. `push %rax` (salvar resultado)
+3. Gerar código para operando esquerdo
+4. `pop %rbx` (recuperar operando direito)
+5. Executar operação
+
+Operações:
+- Soma: `add %rbx, %rax`
+- Subtração: `sub %rbx, %rax`
+- Multiplicação: `imul %rbx, %rax`
+- Divisão: `cqo` + `idiv %rbx`
+
+### Modelo de Saída
+
+```asm
+#
+# Código gerado pelo compilador EC1
+#
+
+.section .text
+.globl _start
+
+_start:
+  # código da expressão aqui
+  # resultado final fica em %rax
+
+  call imprime_num
+  call sair
+
+.include "runtime.s"
+```
+
+## Arquivos
+
+- `token.go` - Definição dos tokens
+- `lexer.go` - Analisador léxico
+- `ast.go` - Definição da AST
+- `parser.go` - Analisador sintático
+- `codegen.go` - Gerador de código assembly
+- `main.go` - Programa principal
+- `runtime.s` - Funções auxiliares (imprime_num, sair)
+- `run_tests.sh` - Script de testes automatizados
 
 ## Testes
 
-### Testes automatizados em Go
+### Executar testes automatizados
 
-```powershell
+```bash
+bash run_tests.sh
+```
+
+### Executar testes unitários do Go
+
+```bash
 go test ./...
 ```
 
-Os testes verificam:
+## Erros
 
-- Tokenização do exemplo do PDF
-- Tokenização com diferentes espaços em branco
-- Detecção de erro léxico e posição correta
+O programa detecta e reporta:
+
+- **Erros léxicos**: `Erro lexico na posicao X`
+- **Erros sintáticos**: `Erro sintatico na posicao X`
+
+## Requisitos
+
+- Go 1.22+
+- GNU Assembler (`as`)
+- GNU Linker (`ld`)
+- Linux x86-64
