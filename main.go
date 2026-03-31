@@ -10,10 +10,10 @@ import (
 )
 
 func main() {
-	outputFile := flag.String("o", "", "Arquivo de saída (padrão: stdout)")
+	outputFile := flag.String("o", "", "Arquivo de saída (padrão: mesmo nome com extensão .s)")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Uso: ec1 [-o arquivo.s] <arquivo.ec1>\n")
-		fmt.Fprintf(os.Stderr, "Compilador EC1 - Gera código assembly x86-64\n\n")
+		fmt.Fprintf(os.Stderr, "Uso: cmd [-o arquivo.s] <arquivo.ev>\n")
+		fmt.Fprintf(os.Stderr, "Compilador Cmd - Gera código assembly x86-64\n\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -42,35 +42,34 @@ func main() {
 		os.Exit(1)
 	}
 
-	ast, err := parser.ParseProgram()
+	prog, err := parser.ParseProgram()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
 
-	// Gera código assembly
-	cg := NewCodeGenerator()
-	code := cg.Generate(ast)
+	if err := CheckProgram(prog); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
 
-	// Escreve a saída
+	cg := NewCodeGenerator()
+	code := cg.Generate(prog)
+
 	if *outputFile != "" {
 		err = os.WriteFile(*outputFile, []byte(code), 0644)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err.Error())
 			os.Exit(2)
 		}
-	} else if path != "-" && !strings.HasSuffix(path, ".ec1") {
-		// Se não especificou -o e o arquivo não termina em .ec1, imprime em stdout
+	} else if path == "-" {
 		fmt.Print(code)
-	} else if path != "-" {
-		// Gera nome do arquivo .s baseado no arquivo de entrada
+	} else {
 		outPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".s"
 		err = os.WriteFile(outPath, []byte(code), 0644)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err.Error())
 			os.Exit(2)
 		}
-	} else {
-		fmt.Print(code)
 	}
 }

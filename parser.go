@@ -38,19 +38,254 @@ func (p *Parser) consume(tt TokenType) error {
 	return p.advance()
 }
 
-func (p *Parser) ParseProgram() (Exp, error) {
-	exp, err := p.parseExp()
+// ParseProgram: <decl>* '{' <cmd>* 'return' <exp> ';' '}'
+func (p *Parser) ParseProgram() (*Programa, error) {
+	var decls []*Decl
+	for p.cur.Type == TokenIdent {
+		decl, err := p.parseDecl()
+		if err != nil {
+			return nil, err
+		}
+		decls = append(decls, decl)
+	}
+	if err := p.consume(TokenChaveEsq); err != nil {
+		return nil, err
+	}
+	cmds, err := p.parseCmdList()
 	if err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenReturn); err != nil {
+		return nil, err
+	}
+	result, err := p.parseExp()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenPontoVirgula); err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenChaveDir); err != nil {
 		return nil, err
 	}
 	if p.cur.Type != TokenEOF {
 		return nil, p.syntaxError()
 	}
-	return exp, nil
+	return &Programa{Decls: decls, Cmds: cmds, Result: result}, nil
 }
 
-func (p *Parser) parseExp() (Exp, error) {
+// parseDecl: <ident> '=' <exp> ';'
+func (p *Parser) parseDecl() (*Decl, error) {
+	name := p.cur.Lexeme
+	if err := p.consume(TokenIdent); err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenIgual); err != nil {
+		return nil, err
+	}
+	exp, err := p.parseExp()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenPontoVirgula); err != nil {
+		return nil, err
+	}
+	return &Decl{Name: name, Exp: exp}, nil
+}
+
+// parseCmdList: <cmd>*  (termina quando não é if/while/ident)
+func (p *Parser) parseCmdList() ([]Cmd, error) {
+	var cmds []Cmd
+	for p.cur.Type == TokenIf || p.cur.Type == TokenWhile || p.cur.Type == TokenIdent {
+		cmd, err := p.parseCmd()
+		if err != nil {
+			return nil, err
+		}
+		cmds = append(cmds, cmd)
+	}
+	return cmds, nil
+}
+
+// parseCmd: <if> | <while> | <atrib>
+func (p *Parser) parseCmd() (Cmd, error) {
 	switch p.cur.Type {
+	case TokenIf:
+		return p.parseIfCmd()
+	case TokenWhile:
+		return p.parseWhileCmd()
+	case TokenIdent:
+		return p.parseAtribCmd()
+	default:
+		return nil, p.syntaxError()
+	}
+}
+
+// parseIfCmd: 'if' <exp> '{' <cmd>* '}' 'else' '{' <cmd>* '}'
+func (p *Parser) parseIfCmd() (*IfCmd, error) {
+	if err := p.consume(TokenIf); err != nil {
+		return nil, err
+	}
+	cond, err := p.parseExp()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenChaveEsq); err != nil {
+		return nil, err
+	}
+	then, err := p.parseCmdList()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenChaveDir); err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenElse); err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenChaveEsq); err != nil {
+		return nil, err
+	}
+	els, err := p.parseCmdList()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenChaveDir); err != nil {
+		return nil, err
+	}
+	return &IfCmd{Cond: cond, Then: then, Else: els}, nil
+}
+
+// parseWhileCmd: 'while' <exp> '{' <cmd>* '}'
+func (p *Parser) parseWhileCmd() (*WhileCmd, error) {
+	if err := p.consume(TokenWhile); err != nil {
+		return nil, err
+	}
+	cond, err := p.parseExp()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenChaveEsq); err != nil {
+		return nil, err
+	}
+	body, err := p.parseCmdList()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenChaveDir); err != nil {
+		return nil, err
+	}
+	return &WhileCmd{Cond: cond, Body: body}, nil
+}
+
+// parseAtribCmd: <ident> '=' <exp> ';'
+func (p *Parser) parseAtribCmd() (*AtribCmd, error) {
+	name := p.cur.Lexeme
+	if err := p.consume(TokenIdent); err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenIgual); err != nil {
+		return nil, err
+	}
+	exp, err := p.parseExp()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenPontoVirgula); err != nil {
+		return nil, err
+	}
+	return &AtribCmd{Name: name, Exp: exp}, nil
+}
+
+// parseExp: <exp_a> (('<' | '>' | '==') <exp_a>)*
+func (p *Parser) parseExp() (Exp, error) {
+	esq, err := p.parseExpA()
+	if err != nil {
+		return nil, err
+	}
+	for p.cur.Type == TokenMenor || p.cur.Type == TokenMaior || p.cur.Type == TokenIgualIgual {
+		tok := p.cur.Type
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+		dir, err := p.parseExpA()
+		if err != nil {
+			return nil, err
+		}
+		var op Operator
+		switch tok {
+		case TokenMenor:
+			op = OpMenor
+		case TokenMaior:
+			op = OpMaior
+		case TokenIgualIgual:
+			op = OpIgualIgual
+		}
+		esq = &OpBin{Op: op, Left: esq, Right: dir}
+	}
+	return esq, nil
+}
+
+// parseExpA: <exp_m> (('+' | '-') <exp_m>)*
+func (p *Parser) parseExpA() (Exp, error) {
+	esq, err := p.parseExpM()
+	if err != nil {
+		return nil, err
+	}
+	for p.cur.Type == TokenSoma || p.cur.Type == TokenSub {
+		tok := p.cur.Type
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+		dir, err := p.parseExpM()
+		if err != nil {
+			return nil, err
+		}
+		var op Operator
+		if tok == TokenSoma {
+			op = OpSoma
+		} else {
+			op = OpSub
+		}
+		esq = &OpBin{Op: op, Left: esq, Right: dir}
+	}
+	return esq, nil
+}
+
+// parseExpM: <prim> (('*' | '/') <prim>)*
+func (p *Parser) parseExpM() (Exp, error) {
+	esq, err := p.parsePrim()
+	if err != nil {
+		return nil, err
+	}
+	for p.cur.Type == TokenMult || p.cur.Type == TokenDiv {
+		tok := p.cur.Type
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+		dir, err := p.parsePrim()
+		if err != nil {
+			return nil, err
+		}
+		var op Operator
+		if tok == TokenMult {
+			op = OpMult
+		} else {
+			op = OpDiv
+		}
+		esq = &OpBin{Op: op, Left: esq, Right: dir}
+	}
+	return esq, nil
+}
+
+// parsePrim: <num> | <var> | '(' <exp> ')'
+func (p *Parser) parsePrim() (Exp, error) {
+	switch p.cur.Type {
+	case TokenIdent:
+		v := &Var{Name: p.cur.Lexeme}
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case TokenNumero:
 		v, err := strconv.Atoi(p.cur.Lexeme)
 		if err != nil {
@@ -65,50 +300,15 @@ func (p *Parser) parseExp() (Exp, error) {
 		if err := p.advance(); err != nil {
 			return nil, err
 		}
-		left, err := p.parseExp()
-		if err != nil {
-			return nil, err
-		}
-		op, err := p.parseOperator()
-		if err != nil {
-			return nil, err
-		}
-		right, err := p.parseExp()
+		exp, err := p.parseExp()
 		if err != nil {
 			return nil, err
 		}
 		if err := p.consume(TokenParenDir); err != nil {
 			return nil, err
 		}
-		return &OpBin{Op: op, Left: left, Right: right}, nil
+		return exp, nil
 	default:
 		return nil, p.syntaxError()
-	}
-}
-
-func (p *Parser) parseOperator() (Operator, error) {
-	switch p.cur.Type {
-	case TokenSoma:
-		if err := p.advance(); err != nil {
-			return "", err
-		}
-		return OpSoma, nil
-	case TokenSub:
-		if err := p.advance(); err != nil {
-			return "", err
-		}
-		return OpSub, nil
-	case TokenMult:
-		if err := p.advance(); err != nil {
-			return "", err
-		}
-		return OpMult, nil
-	case TokenDiv:
-		if err := p.advance(); err != nil {
-			return "", err
-		}
-		return OpDiv, nil
-	default:
-		return "", p.syntaxError()
 	}
 }

@@ -76,7 +76,7 @@ func TestWhitespace(t *testing.T) {
 }
 
 func TestLexicalErrorPosition(t *testing.T) {
-	_, err := tokensFrom("(3 + a)")
+	_, err := tokensFrom("(3 + @)")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -96,7 +96,7 @@ func TestEmptyInput(t *testing.T) {
 }
 
 func TestInvalidCharacterAtStart(t *testing.T) {
-	_, err := tokensFrom("x")
+	_, err := tokensFrom("@")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -115,5 +115,144 @@ func TestNumberTokenPosition(t *testing.T) {
 	}
 	if toks[0].Type != TokenNumero || toks[0].Lexeme != "123" || toks[0].Pos != 2 {
 		t.Fatalf("token: got %+v want %+v", toks[0], Token{Type: TokenNumero, Lexeme: "123", Pos: 2})
+	}
+}
+
+func TestIdentToken(t *testing.T) {
+	cases := []struct {
+		input  string
+		lexeme string
+		pos    int
+	}{
+		{"abc", "abc", 0},
+		{"x", "x", 0},
+		{"Foo123", "Foo123", 0},
+	}
+	for _, c := range cases {
+		toks, err := tokensFrom(c.input)
+		if err != nil {
+			t.Fatalf("input %q: unexpected err: %v", c.input, err)
+		}
+		if len(toks) != 1 {
+			t.Fatalf("input %q: token count: got %d want 1", c.input, len(toks))
+		}
+		want := Token{Type: TokenIdent, Lexeme: c.lexeme, Pos: c.pos}
+		if toks[0] != want {
+			t.Fatalf("input %q: got %+v want %+v", c.input, toks[0], want)
+		}
+	}
+}
+
+func TestIgualToken(t *testing.T) {
+	toks, err := tokensFrom("=")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(toks) != 1 {
+		t.Fatalf("token count: got %d want 1", len(toks))
+	}
+	want := Token{Type: TokenIgual, Lexeme: "=", Pos: 0}
+	if toks[0] != want {
+		t.Fatalf("got %+v want %+v", toks[0], want)
+	}
+}
+
+func TestIgualIgualToken(t *testing.T) {
+	toks, err := tokensFrom("==")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(toks) != 1 {
+		t.Fatalf("token count: got %d want 1", len(toks))
+	}
+	want := Token{Type: TokenIgualIgual, Lexeme: "==", Pos: 0}
+	if toks[0] != want {
+		t.Fatalf("got %+v want %+v", toks[0], want)
+	}
+}
+
+func TestPontoVirgulaToken(t *testing.T) {
+	toks, err := tokensFrom(";")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(toks) != 1 {
+		t.Fatalf("token count: got %d want 1", len(toks))
+	}
+	want := Token{Type: TokenPontoVirgula, Lexeme: ";", Pos: 0}
+	if toks[0] != want {
+		t.Fatalf("got %+v want %+v", toks[0], want)
+	}
+}
+
+func TestLexicalErrorDigitLetraSequence(t *testing.T) {
+	_, err := tokensFrom("237axy")
+	if err == nil {
+		t.Fatalf("expected lexical error")
+	}
+	if err.Error() != "Erro lexico na posicao 3" {
+		t.Fatalf("unexpected error: %q", err.Error())
+	}
+}
+
+func TestChaveTokens(t *testing.T) {
+	toks, err := tokensFrom("{}")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(toks) != 2 {
+		t.Fatalf("token count: got %d want 2", len(toks))
+	}
+	if toks[0].Type != TokenChaveEsq || toks[1].Type != TokenChaveDir {
+		t.Fatalf("got %+v %+v, want ChaveEsq ChaveDir", toks[0], toks[1])
+	}
+}
+
+func TestComparadorTokens(t *testing.T) {
+	cases := []struct {
+		input string
+		typ   TokenType
+		lex   string
+	}{
+		{"<", TokenMenor, "<"},
+		{">", TokenMaior, ">"},
+		{"==", TokenIgualIgual, "=="},
+	}
+	for _, c := range cases {
+		toks, err := tokensFrom(c.input)
+		if err != nil {
+			t.Fatalf("input %q: unexpected err: %v", c.input, err)
+		}
+		if len(toks) != 1 {
+			t.Fatalf("input %q: token count: got %d want 1", c.input, len(toks))
+		}
+		want := Token{Type: c.typ, Lexeme: c.lex, Pos: 0}
+		if toks[0] != want {
+			t.Fatalf("input %q: got %+v want %+v", c.input, toks[0], want)
+		}
+	}
+}
+
+func TestKeywordTokens(t *testing.T) {
+	cases := []struct {
+		input string
+		typ   TokenType
+	}{
+		{"if", TokenIf},
+		{"else", TokenElse},
+		{"while", TokenWhile},
+		{"return", TokenReturn},
+	}
+	for _, c := range cases {
+		toks, err := tokensFrom(c.input)
+		if err != nil {
+			t.Fatalf("input %q: unexpected err: %v", c.input, err)
+		}
+		if len(toks) != 1 {
+			t.Fatalf("input %q: token count: got %d want 1", c.input, len(toks))
+		}
+		if toks[0].Type != c.typ {
+			t.Fatalf("input %q: got type %v want %v", c.input, toks[0].Type, c.typ)
+		}
 	}
 }

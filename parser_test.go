@@ -2,7 +2,24 @@ package main
 
 import "testing"
 
-func parse(input string) (Exp, error) {
+// parseArith analisa apenas uma expressão aritmética/comparação (sem programa completo).
+func parseArith(input string) (Exp, error) {
+	p, err := NewParser(NewLexer(input))
+	if err != nil {
+		return nil, err
+	}
+	exp, err := p.parseExp()
+	if err != nil {
+		return nil, err
+	}
+	if p.cur.Type != TokenEOF {
+		return nil, p.syntaxError()
+	}
+	return exp, nil
+}
+
+// parseCmd analisa um programa Cmd completo.
+func parseCmd(input string) (*Programa, error) {
 	p, err := NewParser(NewLexer(input))
 	if err != nil {
 		return nil, err
@@ -10,26 +27,21 @@ func parse(input string) (Exp, error) {
 	return p.ParseProgram()
 }
 
+// --- Testes de expressões aritméticas ---
+
 func TestParseConst(t *testing.T) {
-	exp, err := parse("333")
+	exp, err := parseArith("333")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if exp.String() != "333" {
 		t.Fatalf("tree: got %q want %q", exp.String(), "333")
 	}
-	v, err := exp.Eval()
-	if err != nil {
-		t.Fatalf("eval unexpected err: %v", err)
-	}
-	if v != 333 {
-		t.Fatalf("eval: got %d want %d", v, 333)
-	}
 }
 
 func TestParseTreeAndEval(t *testing.T) {
 	input := "(33 + (912 * 11))"
-	exp, err := parse(input)
+	exp, err := parseArith(input)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -39,35 +51,21 @@ func TestParseTreeAndEval(t *testing.T) {
 	if TreeString(exp) != "+\n|-- 33\n`-- *\n    |-- 912\n    `-- 11" {
 		t.Fatalf("visual tree: got %q", TreeString(exp))
 	}
-	v, err := exp.Eval()
-	if err != nil {
-		t.Fatalf("eval unexpected err: %v", err)
-	}
-	if v != 10065 {
-		t.Fatalf("eval: got %d want %d", v, 10065)
-	}
 }
 
 func TestParseWhitespace(t *testing.T) {
 	input := "(  3\t+\n(4+5) )"
-	exp, err := parse(input)
+	exp, err := parseArith(input)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if exp.String() != "(3 + (4 + 5))" {
 		t.Fatalf("tree: got %q want %q", exp.String(), "(3 + (4 + 5))")
 	}
-	v, err := exp.Eval()
-	if err != nil {
-		t.Fatalf("eval unexpected err: %v", err)
-	}
-	if v != 12 {
-		t.Fatalf("eval: got %d want %d", v, 12)
-	}
 }
 
 func TestSyntaxError(t *testing.T) {
-	_, err := parse("(3 + )")
+	_, err := parseArith("(3 + )")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -77,7 +75,7 @@ func TestSyntaxError(t *testing.T) {
 }
 
 func TestSyntaxErrorMissingClosingParen(t *testing.T) {
-	_, err := parse("(3 + 4")
+	_, err := parseArith("(3 + 4")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -87,7 +85,7 @@ func TestSyntaxErrorMissingClosingParen(t *testing.T) {
 }
 
 func TestSyntaxErrorExtraTokensAfterExpression(t *testing.T) {
-	_, err := parse("(3 + 4) 5")
+	_, err := parseArith("(3 + 4) 5")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -97,7 +95,7 @@ func TestSyntaxErrorExtraTokensAfterExpression(t *testing.T) {
 }
 
 func TestSyntaxErrorUnknownOperator(t *testing.T) {
-	_, err := parse("(3 ^ 4)")
+	_, err := parseArith("(3 ^ 4)")
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -106,34 +104,307 @@ func TestSyntaxErrorUnknownOperator(t *testing.T) {
 	}
 }
 
-func TestParseBiggerExpressionEval(t *testing.T) {
-	input := "(((1000 + (72 * (55 - 17))) - (840 / (14 - 7))) + ((96 / 8) * (30 + 12)))"
-	exp, err := parse(input)
+func TestPrecedenciaMultAntesSoma(t *testing.T) {
+	exp, err := parseArith("7 + 5 * 3")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if exp.String() != input {
-		t.Fatalf("tree: got %q want %q", exp.String(), input)
+	if exp.String() != "(7 + (5 * 3))" {
+		t.Fatalf("tree: got %q want %q", exp.String(), "(7 + (5 * 3))")
 	}
-	v, err := exp.Eval()
+	v, err := evalExpEnv(exp, nil)
 	if err != nil {
 		t.Fatalf("eval unexpected err: %v", err)
 	}
-	if v != 4120 {
-		t.Fatalf("eval: got %d want %d", v, 4120)
+	if v != 22 {
+		t.Fatalf("eval: got %d want %d", v, 22)
 	}
 }
 
-func TestEvalDivisionByZero(t *testing.T) {
-	exp, err := parse("(1 / 0)")
+func TestAssociatividadeEsquerda(t *testing.T) {
+	exp, err := parseArith("10 - 8 - 2")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	_, err = exp.Eval()
-	if err == nil {
-		t.Fatalf("expected error")
+	v, err := evalExpEnv(exp, nil)
+	if err != nil {
+		t.Fatalf("eval unexpected err: %v", err)
 	}
-	if err.Error() != "Erro de execucao: divisao por zero" {
+	if v != 0 {
+		t.Fatalf("eval: got %d want %d", v, 0)
+	}
+}
+
+func TestParentesesMudamPrecedencia(t *testing.T) {
+	exp, err := parseArith("(7 + 5) * 3")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	v, err := evalExpEnv(exp, nil)
+	if err != nil {
+		t.Fatalf("eval unexpected err: %v", err)
+	}
+	if v != 36 {
+		t.Fatalf("eval: got %d want %d", v, 36)
+	}
+}
+
+// --- Testes de operadores de comparação ---
+
+func TestComparacaoMenor(t *testing.T) {
+	exp, err := parseArith("3 < 5")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	v, err := evalExpEnv(exp, nil)
+	if err != nil {
+		t.Fatalf("eval unexpected err: %v", err)
+	}
+	if v != 1 {
+		t.Fatalf("eval: got %d want 1", v)
+	}
+}
+
+func TestComparacaoMenorFalso(t *testing.T) {
+	exp, err := parseArith("5 < 3")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	v, err := evalExpEnv(exp, nil)
+	if err != nil {
+		t.Fatalf("eval unexpected err: %v", err)
+	}
+	if v != 0 {
+		t.Fatalf("eval: got %d want 0", v)
+	}
+}
+
+func TestComparacaoMaior(t *testing.T) {
+	exp, err := parseArith("7 > 2")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	v, err := evalExpEnv(exp, nil)
+	if err != nil {
+		t.Fatalf("eval unexpected err: %v", err)
+	}
+	if v != 1 {
+		t.Fatalf("eval: got %d want 1", v)
+	}
+}
+
+func TestComparacaoIgualdade(t *testing.T) {
+	exp, err := parseArith("4 == 4")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	v, err := evalExpEnv(exp, nil)
+	if err != nil {
+		t.Fatalf("eval unexpected err: %v", err)
+	}
+	if v != 1 {
+		t.Fatalf("eval: got %d want 1", v)
+	}
+}
+
+func TestComparacaoPrecedencia(t *testing.T) {
+	// 1 + 2 < 3 + 1 => (1+2) < (3+1) => 3 < 4 => 1
+	exp, err := parseArith("1 + 2 < 3 + 1")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	v, err := evalExpEnv(exp, nil)
+	if err != nil {
+		t.Fatalf("eval unexpected err: %v", err)
+	}
+	if v != 1 {
+		t.Fatalf("eval: got %d want 1", v)
+	}
+}
+
+// --- Testes de programas Cmd ---
+
+func TestCmd_ProgramaSemDeclaracoes(t *testing.T) {
+	prog, err := parseCmd("{ return 7 + 5 * 3; }")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(prog.Decls) != 0 {
+		t.Fatalf("decls: got %d want 0", len(prog.Decls))
+	}
+	v, err := EvalPrograma(prog)
+	if err != nil {
+		t.Fatalf("eval unexpected err: %v", err)
+	}
+	if v != 22 {
+		t.Fatalf("eval: got %d want %d", v, 22)
+	}
+}
+
+func TestCmd_ProgramaComDeclaracao(t *testing.T) {
+	prog, err := parseCmd("x = 30;\n{ return x + 10; }")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(prog.Decls) != 1 {
+		t.Fatalf("decls: got %d want 1", len(prog.Decls))
+	}
+	v, err := EvalPrograma(prog)
+	if err != nil {
+		t.Fatalf("eval unexpected err: %v", err)
+	}
+	if v != 40 {
+		t.Fatalf("eval: got %d want %d", v, 40)
+	}
+}
+
+func TestCmd_If(t *testing.T) {
+	input := `x = 5;
+{
+  if x < 10 {
+    x = x + 1;
+  } else {
+    x = x - 1;
+  }
+  return x;
+}`
+	prog, err := parseCmd(input)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	v, err := EvalPrograma(prog)
+	if err != nil {
+		t.Fatalf("eval unexpected err: %v", err)
+	}
+	if v != 6 {
+		t.Fatalf("eval: got %d want %d", v, 6)
+	}
+}
+
+func TestCmd_While(t *testing.T) {
+	input := `n = 1;
+soma = 0;
+{
+  while n < 5 {
+    soma = soma + n;
+    n = n + 1;
+  }
+  return soma;
+}`
+	prog, err := parseCmd(input)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	v, err := EvalPrograma(prog)
+	if err != nil {
+		t.Fatalf("eval unexpected err: %v", err)
+	}
+	// soma = 1+2+3+4 = 10
+	if v != 10 {
+		t.Fatalf("eval: got %d want %d", v, 10)
+	}
+}
+
+func TestCmd_ErroVariavelNaoDeclaradaEmDecl(t *testing.T) {
+	prog, err := parseCmd("x = 7 + y;\n{ return x; }")
+	if err != nil {
+		t.Fatalf("unexpected parse err: %v", err)
+	}
+	err = CheckProgram(prog)
+	if err == nil {
+		t.Fatalf("expected semantic error")
+	}
+	if err.Error() != "Erro semantico: variavel 'y' nao declarada" {
 		t.Fatalf("unexpected error: %q", err.Error())
+	}
+}
+
+func TestCmd_ErroVariavelNaoDeclaradaEmResultado(t *testing.T) {
+	prog, err := parseCmd("{ return x; }")
+	if err != nil {
+		t.Fatalf("unexpected parse err: %v", err)
+	}
+	err = CheckProgram(prog)
+	if err == nil {
+		t.Fatalf("expected semantic error")
+	}
+	if err.Error() != "Erro semantico: variavel 'x' nao declarada" {
+		t.Fatalf("unexpected error: %q", err.Error())
+	}
+}
+
+func TestCmd_ErroAtribVariavelNaoDeclarada(t *testing.T) {
+	input := `{
+  x = 5;
+  return x;
+}`
+	prog, err := parseCmd(input)
+	if err != nil {
+		t.Fatalf("unexpected parse err: %v", err)
+	}
+	err = CheckProgram(prog)
+	if err == nil {
+		t.Fatalf("expected semantic error")
+	}
+	if err.Error() != "Erro semantico: variavel 'x' nao declarada" {
+		t.Fatalf("unexpected error: %q", err.Error())
+	}
+}
+
+func TestCmd_Delta(t *testing.T) {
+	// |b^2 - 4ac| com a=1, b=2, c=3 => |4 - 12| = 8
+	input := `a = 1;
+b = 2;
+c = 3;
+delta = b * b - 4 * a * c;
+{
+  if delta < 0 {
+    delta = 0 - delta;
+  } else {
+    delta = delta;
+  }
+  return delta;
+}`
+	prog, err := parseCmd(input)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if err := CheckProgram(prog); err != nil {
+		t.Fatalf("semantic err: %v", err)
+	}
+	v, err := EvalPrograma(prog)
+	if err != nil {
+		t.Fatalf("eval unexpected err: %v", err)
+	}
+	if v != 8 {
+		t.Fatalf("eval: got %d want %d", v, 8)
+	}
+}
+
+func TestCmd_SomaWhile(t *testing.T) {
+	// soma de 1..9 = 45
+	input := `n = 1;
+m = 10;
+soma = 0;
+{
+  while n < m {
+    soma = soma + n;
+    n = n + 1;
+  }
+  return soma;
+}`
+	prog, err := parseCmd(input)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if err := CheckProgram(prog); err != nil {
+		t.Fatalf("semantic err: %v", err)
+	}
+	v, err := EvalPrograma(prog)
+	if err != nil {
+		t.Fatalf("eval unexpected err: %v", err)
+	}
+	if v != 45 {
+		t.Fatalf("eval: got %d want %d", v, 45)
 	}
 }

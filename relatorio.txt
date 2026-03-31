@@ -1,0 +1,59 @@
+Atividade 10 - Compilador Cmd (Comandos)
+=========================================
+
+O objetivo desta atividade foi estender o compilador das atividades anteriores para suportar
+a linguagem Cmd, que adiciona comandos à linguagem EV, tornando-a Turing-completa.
+
+As principais adições foram:
+
+1. ANÁLISE LÉXICA (lexer.go, token.go)
+   - Novos tokens: { } < > == if else while return
+   - Diferenciação entre = (atribuição/declaração) e == (igualdade) por lookahead de 1 char
+   - Palavras-chave reconhecidas após identificar o lexema completo do identificador
+
+2. ANÁLISE SINTÁTICA (parser.go)
+   - Novo formato: declarações globais seguidas de bloco { cmds* return exp; }
+   - Novos não-terminais: <cmd>, <if>, <while>, <atrib>
+   - Novo nível de precedência para comparação (abaixo de soma/subtração)
+   - Função parseExp() trata comparações; parseExpA() e parseExpM() permanecem iguais
+
+3. AST (ast.go)
+   - Interface Cmd com implementações: IfCmd, WhileCmd, AtribCmd
+   - Operadores de comparação: OpMenor, OpMaior, OpIgualIgual
+   - Programa: Decls (variáveis globais) + Cmds (comandos) + Result (expressão de retorno)
+   - Intérprete atualizado: executa comandos antes de avaliar a expressão de resultado
+
+4. ANÁLISE SEMÂNTICA (semantic.go)
+   - Verificação de variáveis em comandos if, while e atrib
+   - Atribuição: verifica que a variável do lado esquerdo já foi declarada antes
+   - Erro semântico ao tentar atribuir a variável não declarada
+
+5. GERAÇÃO DE CÓDIGO (codegen.go)
+   - Comparação: CMP + SETZ/SETL/SETG (resultado 1 ou 0 em RAX)
+   - if/else: rótulos Lfalso<n>/Lfim<n> com instruções JZ/JMP
+   - while: rótulos Linicio<n>/Lfim<n> com instruções JZ/JMP
+   - Contador de rótulos garante unicidade em if/while aninhados
+   - Variáveis globais na seção BSS (.lcomm), acesso direto pelo símbolo
+
+Programas de teste incluídos:
+  tests/input.ev   - expressões com variáveis (saída: 60467)
+  tests/input2.ev  - soma de variáveis (saída: 90)
+  tests/input3.ev  - expressão sem declarações (saída: 22)
+  tests/delta.ev   - valor absoluto do discriminante b^2-4ac, a=1,b=2,c=3 (saída: 8)
+  tests/soma.ev    - soma de 1 a 9 usando while (saída: 45)
+  tests/resto.ev   - resto de 10/4 por subtração (saída: 2)
+  tests/mdc.ev     - máximo divisor comum de 18 e 12 (saída: 6)
+  tests/err.ev     - erro léxico
+  tests/err1.ev    - erro semântico: variável não declarada em declaração
+  tests/err2.ev    - erro semântico: variável não declarada no resultado
+
+Como executar:
+  go build -o cmd .
+  ./cmd tests/delta.ev
+  as -o tests/delta.o tests/delta.s
+  ld -o tests/delta tests/delta.o
+  ./tests/delta
+  # saída: 8
+
+Testes unitários Go:
+  go test ./...
