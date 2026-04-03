@@ -1,59 +1,94 @@
-Atividade 10 - Compilador Cmd (Comandos)
-=========================================
+Atividade 11 - Compilador Fun (Funções)
+=======================================
 
-O objetivo desta atividade foi estender o compilador das atividades anteriores para suportar
-a linguagem Cmd, que adiciona comandos à linguagem EV, tornando-a Turing-completa.
+O objetivo desta atividade foi estender o compilador da atividade 10 para suportar a
+linguagem Fun, adicionando funções, parâmetros, variáveis locais e o bloco principal
+identificado pela palavra-chave main.
 
-As principais adições foram:
+Principais mudanças implementadas:
 
-1. ANÁLISE LÉXICA (lexer.go, token.go)
-   - Novos tokens: { } < > == if else while return
-   - Diferenciação entre = (atribuição/declaração) e == (igualdade) por lookahead de 1 char
-   - Palavras-chave reconhecidas após identificar o lexema completo do identificador
+1. ANALISE LEXICA (lexer.go, token.go)
+   - Novos tokens: , fun var main
+   - Novas palavras-chave reconhecidas: fun, var, main
+   - O restante do comportamento do lexer foi mantido
 
-2. ANÁLISE SINTÁTICA (parser.go)
-   - Novo formato: declarações globais seguidas de bloco { cmds* return exp; }
-   - Novos não-terminais: <cmd>, <if>, <while>, <atrib>
-   - Novo nível de precedência para comparação (abaixo de soma/subtração)
-   - Função parseExp() trata comparações; parseExpA() e parseExpM() permanecem iguais
+2. ANALISE SINTATICA (parser.go)
+   - Novo formato do programa: decl* main { cmds* return exp; }
+   - Declarações podem ser de variável global ou função
+   - Declarações de variável agora usam a forma var x = exp;
+   - Funções são reconhecidas com lista de parâmetros formais opcional
+   - Chamadas de função são reconhecidas como expressões primárias
+   - O parser usa lookahead de 1 token para diferenciar referência a variável de chamada
 
-3. AST (ast.go)
-   - Interface Cmd com implementações: IfCmd, WhileCmd, AtribCmd
-   - Operadores de comparação: OpMenor, OpMaior, OpIgualIgual
-   - Programa: Decls (variáveis globais) + Cmds (comandos) + Result (expressão de retorno)
-   - Intérprete atualizado: executa comandos antes de avaliar a expressão de resultado
+3. AST E INTERPRETE (ast.go)
+   - Novos nós: Call, VarDecl, FunDecl
+   - Programa passa a armazenar uma sequência de declarações mais o bloco principal
+   - O intérprete agora possui:
+     * ambiente global
+     * ambiente local por chamada de função
+     * parâmetros tratados como variáveis locais
+     * busca local-primeiro e depois global
+     * suporte a recursão direta
 
-4. ANÁLISE SEMÂNTICA (semantic.go)
-   - Verificação de variáveis em comandos if, while e atrib
-   - Atribuição: verifica que a variável do lado esquerdo já foi declarada antes
-   - Erro semântico ao tentar atribuir a variável não declarada
+4. ANALISE SEMANTICA (semantic.go)
+   - Tabela global distingue variáveis globais e funções
+   - Cada função é registrada antes da análise do próprio corpo, permitindo recursão direta
+   - Chamadas verificam:
+     * se a função existe
+     * se o símbolo é realmente uma função
+     * se a quantidade de argumentos corresponde à aridade declarada
+   - Variáveis em funções são resolvidas consultando primeiro o escopo local e depois o global
+   - Símbolos duplicados no mesmo escopo são rejeitados
+   - Chamadas para funções declaradas apenas depois do ponto de uso continuam sendo rejeitadas
+   - Recursão mútua não foi implementada
 
-5. GERAÇÃO DE CÓDIGO (codegen.go)
-   - Comparação: CMP + SETZ/SETL/SETG (resultado 1 ou 0 em RAX)
-   - if/else: rótulos Lfalso<n>/Lfim<n> com instruções JZ/JMP
-   - while: rótulos Linicio<n>/Lfim<n> com instruções JZ/JMP
-   - Contador de rótulos garante unicidade em if/while aninhados
-   - Variáveis globais na seção BSS (.lcomm), acesso direto pelo símbolo
+5. GERACAO DE CODIGO (codegen.go)
+   - Variáveis globais continuam na seção BSS
+   - O bloco principal permanece em _start
+   - Cada função gera:
+     * rótulo com o nome da função
+     * prólogo com push %rbp, alocação dos locais e mov %rsp, %rbp
+     * inicialização das variáveis locais
+     * código dos comandos
+     * cálculo da expressão de retorno em %rax
+     * epílogo com desalocação, pop %rbp e ret
+   - Chamadas de função:
+     * avaliam argumentos da direita para a esquerda
+     * empilham os argumentos
+     * usam call nome
+     * limpam a pilha após o retorno
+   - Parâmetros e locais são acessados por deslocamento relativo a %rbp
+   - Acesso a globais usa endereçamento relativo a %rip
 
-Programas de teste incluídos:
-  tests/input.ev   - expressões com variáveis (saída: 60467)
-  tests/input2.ev  - soma de variáveis (saída: 90)
-  tests/input3.ev  - expressão sem declarações (saída: 22)
-  tests/delta.ev   - valor absoluto do discriminante b^2-4ac, a=1,b=2,c=3 (saída: 8)
-  tests/soma.ev    - soma de 1 a 9 usando while (saída: 45)
-  tests/resto.ev   - resto de 10/4 por subtração (saída: 2)
-  tests/mdc.ev     - máximo divisor comum de 18 e 12 (saída: 6)
-  tests/err.ev     - erro léxico
-  tests/err1.ev    - erro semântico: variável não declarada em declaração
-  tests/err2.ev    - erro semântico: variável não declarada no resultado
+6. TESTES
+   - Testes unitários Go para:
+     * novos tokens
+     * parsing de funções e chamadas
+     * distinção entre variável e chamada
+     * semântica de funções e aridade
+     * sombra de globais por locais/parâmetros
+     * recursão direta
+     * inspeção do assembly gerado
+   - Programas .fun em tests/ cobrindo:
+     * variável local
+     * função sem parâmetros
+     * chamada encadeada
+     * sombra de variáveis
+     * recursão direta
+     * erros semânticos de função
 
 Como executar:
-  go build -o cmd .
-  ./cmd tests/delta.ev
-  as -o tests/delta.o tests/delta.s
-  ld -o tests/delta tests/delta.o
-  ./tests/delta
-  # saída: 8
-
-Testes unitários Go:
   go test ./...
+
+No Linux/WSL:
+  sh run_tests.sh
+
+Exemplo manual:
+  go build -o cmd .
+  ./cmd tests/fact.fun
+  as -o tests/fact.o tests/fact.s
+  ld -o tests/fact tests/fact.o
+  ./tests/fact
+
+Saída esperada para fact.fun:
+  120

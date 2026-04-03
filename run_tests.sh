@@ -1,102 +1,89 @@
-#!/bin/bash
-#
-# Script de teste para o compilador EC1
-#
+#!/bin/sh
+set -eu
 
-EC1="./ec1"
+BIN="./cmd"
 TESTS_DIR="tests"
 
-RED='\033[0;31m'
 GREEN='\033[0;32m'
+RED='\033[0;31m'
 NC='\033[0m'
 
-echo "Compilando EC1..."
-go build -o ec1 *.go || exit 1
-
-run_test() {
-    local input="$1"
-    local expected="$2"
-    local name="$3"
-
-    echo "$input" | $EC1 -o /tmp/test_$$.s -
-    as -o /tmp/test_$$.o /tmp/test_$$.s
-    ld -o /tmp/test_$$ /tmp/test_$$.o
-    result=$(/tmp/test_$$)
-    rm -f /tmp/test_$$.s /tmp/test_$$.o /tmp/test_$$
-
-    if [ "$result" = "$expected" ]; then
-        echo -e "${GREEN}[PASS]${NC} $name: $input = $expected"
-        return 0
-    else
-        echo -e "${RED}[FAIL]${NC} $name: $input"
-        echo "  Esperado: $expected"
-        echo "  Obtido:   $result"
-        return 1
-    fi
-}
+echo "Compilando o compilador Fun..."
+go build -o "$BIN" .
 
 echo ""
-echo "Executando testes..."
+echo "Executando go test..."
+go test ./...
+
 echo ""
+echo "Executando testes integrados de programas Fun..."
 
 PASSED=0
 FAILED=0
 
-# Testes
-tests=(
-    "42|42|Constante simples"
-    "0|0|Zero"
-    "333|333|Número maior"
-    "(7 + 11)|18|Soma simples"
-    "(11 - 7)|4|Subtração simples"
-    "(6 * 7)|42|Multiplicação simples"
-    "(20 / 4)|5|Divisão simples"
-    "(3 + (4 + (11 + 7)))|25|Somas aninhadas"
-    "(33 + (912 * 11))|10065|Soma e multiplicação"
-    "((427 / 7) + (11 * (231 + 5)))|2657|Expressão complexa"
-)
+run_program_test() {
+    file="$1"
+    expected="$2"
 
-for test in "${tests[@]}"; do
-    IFS='|' read -r input expected name <<< "$test"
-    if run_test "$input" "$expected" "$name"; then
-        ((PASSED++))
-    else
-        ((FAILED++))
-    fi
-done
+    base="${file%.fun}"
+    asm="${base}.s"
+    obj="${base}.o"
+    exe="${base}"
 
-# Testes com arquivos
-if [ -f "$TESTS_DIR/input2.ec1" ]; then
-    $EC1 "$TESTS_DIR/input2.ec1"
-    as -o "$TESTS_DIR/input2.o" "$TESTS_DIR/input2.s"
-    ld -o "$TESTS_DIR/input2" "$TESTS_DIR/input2.o"
-    result=$("$TESTS_DIR/input2")
-    if [ "$result" = "1065" ]; then
-        echo -e "${GREEN}[PASS]${NC} input2.ec1 = 1065"
-        ((PASSED++))
-    else
-        echo -e "${RED}[FAIL]${NC} input2.ec1: esperado 1065, obtido $result"
-        ((FAILED++))
-    fi
-fi
+    "$BIN" "$file"
+    as -o "$obj" "$asm"
+    ld -o "$exe" "$obj"
+    result=$("./$exe")
 
-if [ -f "$TESTS_DIR/input3.ec1" ]; then
-    $EC1 "$TESTS_DIR/input3.ec1"
-    as -o "$TESTS_DIR/input3.o" "$TESTS_DIR/input3.s"
-    ld -o "$TESTS_DIR/input3" "$TESTS_DIR/input3.o"
-    result=$("$TESTS_DIR/input3")
-    if [ "$result" = "4120" ]; then
-        echo -e "${GREEN}[PASS]${NC} input3.ec1 = 4120"
-        ((PASSED++))
+    if [ "$result" = "$expected" ]; then
+        printf "${GREEN}[PASS]${NC} %s => %s\n" "$file" "$expected"
+        PASSED=$((PASSED + 1))
     else
-        echo -e "${RED}[FAIL]${NC} input3.ec1: esperado 4120, obtido $result"
-        ((FAILED++))
+        printf "${RED}[FAIL]${NC} %s\n" "$file"
+        echo "  esperado: $expected"
+        echo "  obtido:   $result"
+        FAILED=$((FAILED + 1))
     fi
-fi
+}
+
+run_error_test() {
+    file="$1"
+    expected="$2"
+
+    if output=$("$BIN" "$file" 2>&1); then
+        printf "${RED}[FAIL]${NC} %s\n" "$file"
+        echo "  esperado erro contendo: $expected"
+        echo "  compilacao concluiu sem erro"
+        FAILED=$((FAILED + 1))
+        return
+    fi
+
+    case "$output" in
+        *"$expected"*)
+        printf "${GREEN}[PASS]${NC} %s => erro esperado\n" "$file"
+        PASSED=$((PASSED + 1))
+        ;;
+        *)
+        printf "${RED}[FAIL]${NC} %s\n" "$file"
+        echo "  esperado erro contendo: $expected"
+        echo "  obtido: $output"
+        FAILED=$((FAILED + 1))
+        ;;
+    esac
+}
+
+run_program_test "$TESTS_DIR/abs.fun" "11"
+run_program_test "$TESTS_DIR/noargs.fun" "42"
+run_program_test "$TESTS_DIR/chain.fun" "28"
+run_program_test "$TESTS_DIR/shadow.fun" "142"
+run_program_test "$TESTS_DIR/fact.fun" "120"
+
+run_error_test "$TESTS_DIR/err_fun_undef.fun" "Erro semantico: funcao 'foo' nao declarada"
+run_error_test "$TESTS_DIR/err_fun_arity.fun" "Erro semantico: funcao 'inc' esperava 1 parametros, recebeu 2"
 
 echo ""
 echo "================================"
 echo "Resultados: $PASSED passou, $FAILED falhou"
 echo "================================"
 
-exit $FAILED
+exit "$FAILED"

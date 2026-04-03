@@ -1,80 +1,49 @@
-# Atividade 10 — Compilador Cmd (Comandos)
+# Atividade 11 - Compilador Fun (Funções)
 
-Compilador completo para a linguagem **Cmd**, gerando código **assembly x86-64** para Linux.
+Compilador para a linguagem **Fun**, gerando código **assembly x86-64** para Linux.
 
-A linguagem Cmd estende a linguagem EV (atividades anteriores) adicionando:
-- Bloco principal delimitado por `{` e `}` com `return`
-- Comando condicional `if/else`
-- Comando de repetição `while`
-- Comando de atribuição (modifica variáveis já declaradas)
-- Operadores de comparação: `<`, `>`, `==`
+A linguagem Fun estende a linguagem Cmd com:
+- declarações globais com `var`
+- bloco principal marcado por `main`
+- declaração de funções com `fun`
+- parâmetros formais e reais
+- variáveis locais dentro de funções
+- chamadas de função como expressões
+- escopo local com precedência sobre variáveis globais
 
-## Linguagem Cmd
+## Gramática
 
-### Gramática
-
-```
-<programa> ::= <decl>* '{' <cmd>* 'return' <exp> ';' '}'
-<decl>     ::= <var> '=' <exp> ';'
+```txt
+<programa> ::= <decl>* 'main' '{' <cmd>* 'return' <exp> ';' '}'
+<decl>     ::= <vardecl> | <fundecl>
+<fundecl>  ::= 'fun' <ident> '(' <arglist>? ')'
+               '{' <vardecl>* <cmd>* 'return' <exp> ';' '}'
+<arglist>  ::= <ident> | <ident> ',' <arglist>
+<vardecl>  ::= 'var' <ident> '=' <exp> ';'
 <cmd>      ::= <if> | <while> | <atrib>
 <if>       ::= 'if' <exp> '{' <cmd>* '}' 'else' '{' <cmd>* '}'
 <while>    ::= 'while' <exp> '{' <cmd>* '}'
-<atrib>    ::= <var> '=' <exp> ';'
+<atrib>    ::= <ident> '=' <exp> ';'
 <exp>      ::= <exp_a> (('<' | '>' | '==') <exp_a>)*
 <exp_a>    ::= <exp_m> (('+' | '-') <exp_m>)*
 <exp_m>    ::= <prim> (('*' | '/') <prim>)*
-<prim>     ::= <num> | <var> | '(' <exp> ')'
+<prim>     ::= <num> | <ident> | '(' <exp> ')' | <fun>
+<fun>      ::= <ident> '(' <params>? ')'
+<params>   ::= <exp> | <exp> ',' <params>
 ```
-
-### Exemplo — valor absoluto do discriminante
-
-```
-a = 1;
-b = 2;
-c = 3;
-delta = b * b - 4 * a * c;
-{
-  if delta < 0 {
-    delta = 0 - delta;
-  } else {
-    delta = delta;
-  }
-  return delta;
-}
-```
-
-Saída: `8`
-
-### Exemplo — soma com while
-
-```
-n = 1;
-m = 10;
-soma = 0;
-{
-  while n < m {
-    soma = soma + n;
-    n = n + 1;
-  }
-  return soma;
-}
-```
-
-Saída: `45`
 
 ## Componentes
 
 | Arquivo | Descrição |
 |---------|-----------|
-| `token.go` | Tipos de tokens (incluindo `{`, `}`, `<`, `>`, `==`, palavras-chave) |
+| `token.go` | Tipos de tokens da linguagem Fun |
 | `lexer.go` | Analisador léxico |
-| `ast.go` | AST: expressões, comandos (`IfCmd`, `WhileCmd`, `AtribCmd`), intérprete |
-| `parser.go` | Analisador sintático (descendente recursivo) |
-| `semantic.go` | Verificação semântica (variáveis declaradas) |
-| `codegen.go` | Gerador de código assembly x86-64 |
-| `main.go` | Programa principal |
-| `runtime/runtime.s` | Funções auxiliares (`imprime_num`, `sair`) |
-| `tests/` | Programas de teste |
+| `parser.go` | Parser descendente recursivo com lookahead para diferenciar variável/chamada |
+| `ast.go` | AST, intérprete e suporte a escopos locais |
+| `semantic.go` | Verificação semântica de variáveis, funções e aridade |
+| `codegen.go` | Geração de assembly x86-64 com prólogo/epílogo de funções |
+| `runtime/runtime.s` | Funções auxiliares `imprime_num` e `sair` |
+| `tests/` | Programas de teste para Cmd e Fun |
 
 ## Como usar
 
@@ -84,25 +53,20 @@ Saída: `45`
 go build -o cmd .
 ```
 
-### Compilar um programa Cmd
+### Compilar um programa Fun
 
 ```bash
-# Gera arquivo .s no mesmo diretório do .ev
-./cmd tests/delta.ev
-
-# Especificar arquivo de saída
-./cmd -o saida.s tests/delta.ev
-
-# Ler da entrada padrão
-echo '{ return 42; }' | ./cmd -o /tmp/test.s -
+./cmd tests/abs.fun
+./cmd -o tests/abs.s tests/abs.fun
+echo 'main { return 42; }' | ./cmd -o /tmp/test.s -
 ```
 
-### Montar e executar (a partir do diretório raiz do projeto)
+### Montar e executar no Linux/WSL
 
 ```bash
-as -o tests/delta.o tests/delta.s
-ld -o tests/delta tests/delta.o
-./tests/delta
+as -o tests/abs.o tests/abs.s
+ld -o tests/abs tests/abs.o
+./tests/abs
 ```
 
 ### Executar testes unitários
@@ -111,65 +75,38 @@ ld -o tests/delta tests/delta.o
 go test ./...
 ```
 
-## Geração de Código
+### Executar testes integrados no WSL
 
-### Operadores de comparação
-
-```asm
-# A < B  (resultado: 1 se verdadeiro, 0 se falso)
-<codigo_B>
-push %rax
-<codigo_A>
-pop %rbx
-xor %rcx, %rcx
-cmp %rbx, %rax    # flags baseados em A - B
-setl %cl          # setz para ==, setg para >
-mov %rcx, %rax
+```bash
+sh run_tests.sh
 ```
 
-### Comando if/else
+O script `run_tests.sh` compila o compilador, gera assembly para programas `.fun`, monta, linka e executa os binários no ambiente Linux/WSL.
 
-```asm
-<codigo_cond>
-cmp $0, %rax
-jz LfalsoN
-<codigo_then>
-jmp LfimN
-LfalsoN:
-<codigo_else>
-LfimN:
-```
-
-### Comando while
-
-```asm
-LinicioN:
-<codigo_cond>
-cmp $0, %rax
-jz LfimN
-<codigo_corpo>
-jmp LinicioN
-LfimN:
-```
-
-## Programas de teste
+## Programas de teste Fun
 
 | Arquivo | Descrição | Saída esperada |
 |---------|-----------|----------------|
-| `tests/input.ev` | Expressão com variáveis | `60467` |
-| `tests/input2.ev` | Soma de variáveis | `90` |
-| `tests/input3.ev` | Expressão simples | `22` |
-| `tests/delta.ev` | Valor absoluto do discriminante | `8` |
-| `tests/soma.ev` | Soma 1..9 com while | `45` |
-| `tests/resto.ev` | Resto da divisão por subtração | `2` |
-| `tests/mdc.ev` | Máximo divisor comum | `6` |
-| `tests/err.ev` | Erro léxico | — |
-| `tests/err1.ev` | Erro semântico: variável não declarada | — |
-| `tests/err2.ev` | Erro semântico: variável não declarada | — |
+| `tests/abs.fun` | Função com variável local | `11` |
+| `tests/noargs.fun` | Função sem parâmetros | `42` |
+| `tests/chain.fun` | Função chamando outra função | `28` |
+| `tests/shadow.fun` | Sombra de global por parâmetro/local | `142` |
+| `tests/fact.fun` | Recursão direta (fatorial) | `120` |
+| `tests/err_fun_undef.fun` | Erro semântico: função não declarada | — |
+| `tests/err_fun_arity.fun` | Erro semântico: aridade incorreta | — |
+
+## Convenção de chamada
+
+- Argumentos são empilhados da direita para a esquerda.
+- A chamada usa `call nome`.
+- O chamador remove os argumentos da pilha após o retorno.
+- O retorno da função é sempre colocado em `%rax`.
+- Cada função usa `%rbp` como frame pointer.
+- Variáveis locais e parâmetros são acessados com deslocamento relativo a `%rbp`.
 
 ## Requisitos
 
 - Go 1.22+
 - GNU Assembler (`as`)
 - GNU Linker (`ld`)
-- Linux x86-64
+- Linux x86-64 ou WSL para execução dos binários gerados

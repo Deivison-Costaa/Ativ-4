@@ -2,7 +2,6 @@ package main
 
 import "testing"
 
-// parseArith analisa apenas uma expressão aritmética/comparação (sem programa completo).
 func parseArith(input string) (Exp, error) {
 	p, err := NewParser(NewLexer(input))
 	if err != nil {
@@ -18,8 +17,7 @@ func parseArith(input string) (Exp, error) {
 	return exp, nil
 }
 
-// parseCmd analisa um programa Cmd completo.
-func parseCmd(input string) (*Programa, error) {
+func parseFun(input string) (*Programa, error) {
 	p, err := NewParser(NewLexer(input))
 	if err != nil {
 		return nil, err
@@ -27,347 +25,104 @@ func parseCmd(input string) (*Programa, error) {
 	return p.ParseProgram()
 }
 
-// --- Testes de expressões aritméticas ---
-
-func TestParseConst(t *testing.T) {
-	exp, err := parseArith("333")
+func TestParseCallExpression(t *testing.T) {
+	exp, err := parseArith("soma(x, 2)")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if exp.String() != "333" {
-		t.Fatalf("tree: got %q want %q", exp.String(), "333")
+	call, ok := exp.(*Call)
+	if !ok {
+		t.Fatalf("got %T want *Call", exp)
+	}
+	if call.Name != "soma" || len(call.Args) != 2 {
+		t.Fatalf("got %+v", call)
+	}
+	if call.String() != "soma(x, 2)" {
+		t.Fatalf("string: got %q", call.String())
 	}
 }
 
-func TestParseTreeAndEval(t *testing.T) {
-	input := "(33 + (912 * 11))"
-	exp, err := parseArith(input)
+func TestParseVarVsCall(t *testing.T) {
+	exp, err := parseArith("foo + bar(3)")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if exp.String() != input {
-		t.Fatalf("tree: got %q want %q", exp.String(), input)
+	bin, ok := exp.(*OpBin)
+	if !ok {
+		t.Fatalf("got %T want *OpBin", exp)
 	}
-	if TreeString(exp) != "+\n|-- 33\n`-- *\n    |-- 912\n    `-- 11" {
-		t.Fatalf("visual tree: got %q", TreeString(exp))
+	if _, ok := bin.Left.(*Var); !ok {
+		t.Fatalf("left: got %T want *Var", bin.Left)
+	}
+	if _, ok := bin.Right.(*Call); !ok {
+		t.Fatalf("right: got %T want *Call", bin.Right)
 	}
 }
 
-func TestParseWhitespace(t *testing.T) {
-	input := "(  3\t+\n(4+5) )"
-	exp, err := parseArith(input)
+func TestParseProgramWithFunctionAndMain(t *testing.T) {
+	input := `var x = 10;
+fun inc(n) {
+  return n + 1;
+}
+main {
+  return inc(x);
+}`
+	prog, err := parseFun(input)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if exp.String() != "(3 + (4 + 5))" {
-		t.Fatalf("tree: got %q want %q", exp.String(), "(3 + (4 + 5))")
+	if len(prog.Decls) != 2 {
+		t.Fatalf("decls: got %d want 2", len(prog.Decls))
+	}
+	if _, ok := prog.Decls[0].(*VarDecl); !ok {
+		t.Fatalf("decl 0: got %T want *VarDecl", prog.Decls[0])
+	}
+	fn, ok := prog.Decls[1].(*FunDecl)
+	if !ok {
+		t.Fatalf("decl 1: got %T want *FunDecl", prog.Decls[1])
+	}
+	if fn.Name != "inc" || len(fn.Params) != 1 || fn.Params[0] != "n" {
+		t.Fatalf("function parsed incorrectly: %+v", fn)
 	}
 }
 
-func TestSyntaxError(t *testing.T) {
-	_, err := parseArith("(3 + )")
-	if err == nil {
-		t.Fatalf("expected error")
-	}
-	if err.Error() != "Erro sintatico na posicao 5" {
-		t.Fatalf("unexpected error: %q", err.Error())
-	}
+func TestParseFunctionNoParams(t *testing.T) {
+	input := `fun answer() {
+  return 42;
 }
-
-func TestSyntaxErrorMissingClosingParen(t *testing.T) {
-	_, err := parseArith("(3 + 4")
-	if err == nil {
-		t.Fatalf("expected error")
-	}
-	if err.Error() != "Erro sintatico na posicao 6" {
-		t.Fatalf("unexpected error: %q", err.Error())
-	}
-}
-
-func TestSyntaxErrorExtraTokensAfterExpression(t *testing.T) {
-	_, err := parseArith("(3 + 4) 5")
-	if err == nil {
-		t.Fatalf("expected error")
-	}
-	if err.Error() != "Erro sintatico na posicao 8" {
-		t.Fatalf("unexpected error: %q", err.Error())
-	}
-}
-
-func TestSyntaxErrorUnknownOperator(t *testing.T) {
-	_, err := parseArith("(3 ^ 4)")
-	if err == nil {
-		t.Fatalf("expected error")
-	}
-	if err.Error() != "Erro lexico na posicao 3" {
-		t.Fatalf("unexpected error: %q", err.Error())
-	}
-}
-
-func TestPrecedenciaMultAntesSoma(t *testing.T) {
-	exp, err := parseArith("7 + 5 * 3")
+main {
+  return answer();
+}`
+	prog, err := parseFun(input)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if exp.String() != "(7 + (5 * 3))" {
-		t.Fatalf("tree: got %q want %q", exp.String(), "(7 + (5 * 3))")
+	fn := prog.Decls[0].(*FunDecl)
+	if len(fn.Params) != 0 {
+		t.Fatalf("params: got %d want 0", len(fn.Params))
 	}
-	v, err := evalExpEnv(exp, nil)
-	if err != nil {
-		t.Fatalf("eval unexpected err: %v", err)
-	}
-	if v != 22 {
-		t.Fatalf("eval: got %d want %d", v, 22)
+	call, ok := prog.Result.(*Call)
+	if !ok || call.Name != "answer" || len(call.Args) != 0 {
+		t.Fatalf("result: got %#v", prog.Result)
 	}
 }
 
-func TestAssociatividadeEsquerda(t *testing.T) {
-	exp, err := parseArith("10 - 8 - 2")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	v, err := evalExpEnv(exp, nil)
-	if err != nil {
-		t.Fatalf("eval unexpected err: %v", err)
-	}
-	if v != 0 {
-		t.Fatalf("eval: got %d want %d", v, 0)
-	}
-}
-
-func TestParentesesMudamPrecedencia(t *testing.T) {
-	exp, err := parseArith("(7 + 5) * 3")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	v, err := evalExpEnv(exp, nil)
-	if err != nil {
-		t.Fatalf("eval unexpected err: %v", err)
-	}
-	if v != 36 {
-		t.Fatalf("eval: got %d want %d", v, 36)
-	}
-}
-
-// --- Testes de operadores de comparação ---
-
-func TestComparacaoMenor(t *testing.T) {
-	exp, err := parseArith("3 < 5")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	v, err := evalExpEnv(exp, nil)
-	if err != nil {
-		t.Fatalf("eval unexpected err: %v", err)
-	}
-	if v != 1 {
-		t.Fatalf("eval: got %d want 1", v)
-	}
-}
-
-func TestComparacaoMenorFalso(t *testing.T) {
-	exp, err := parseArith("5 < 3")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	v, err := evalExpEnv(exp, nil)
-	if err != nil {
-		t.Fatalf("eval unexpected err: %v", err)
-	}
-	if v != 0 {
-		t.Fatalf("eval: got %d want 0", v)
-	}
-}
-
-func TestComparacaoMaior(t *testing.T) {
-	exp, err := parseArith("7 > 2")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	v, err := evalExpEnv(exp, nil)
-	if err != nil {
-		t.Fatalf("eval unexpected err: %v", err)
-	}
-	if v != 1 {
-		t.Fatalf("eval: got %d want 1", v)
-	}
-}
-
-func TestComparacaoIgualdade(t *testing.T) {
-	exp, err := parseArith("4 == 4")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	v, err := evalExpEnv(exp, nil)
-	if err != nil {
-		t.Fatalf("eval unexpected err: %v", err)
-	}
-	if v != 1 {
-		t.Fatalf("eval: got %d want 1", v)
-	}
-}
-
-func TestComparacaoPrecedencia(t *testing.T) {
-	// 1 + 2 < 3 + 1 => (1+2) < (3+1) => 3 < 4 => 1
-	exp, err := parseArith("1 + 2 < 3 + 1")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	v, err := evalExpEnv(exp, nil)
-	if err != nil {
-		t.Fatalf("eval unexpected err: %v", err)
-	}
-	if v != 1 {
-		t.Fatalf("eval: got %d want 1", v)
-	}
-}
-
-// --- Testes de programas Cmd ---
-
-func TestCmd_ProgramaSemDeclaracoes(t *testing.T) {
-	prog, err := parseCmd("{ return 7 + 5 * 3; }")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if len(prog.Decls) != 0 {
-		t.Fatalf("decls: got %d want 0", len(prog.Decls))
-	}
-	v, err := EvalPrograma(prog)
-	if err != nil {
-		t.Fatalf("eval unexpected err: %v", err)
-	}
-	if v != 22 {
-		t.Fatalf("eval: got %d want %d", v, 22)
-	}
-}
-
-func TestCmd_ProgramaComDeclaracao(t *testing.T) {
-	prog, err := parseCmd("x = 30;\n{ return x + 10; }")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if len(prog.Decls) != 1 {
-		t.Fatalf("decls: got %d want 1", len(prog.Decls))
-	}
-	v, err := EvalPrograma(prog)
-	if err != nil {
-		t.Fatalf("eval unexpected err: %v", err)
-	}
-	if v != 40 {
-		t.Fatalf("eval: got %d want %d", v, 40)
-	}
-}
-
-func TestCmd_If(t *testing.T) {
-	input := `x = 5;
-{
-  if x < 10 {
-    x = x + 1;
+func TestEvalProgramFunctionWithLocalVar(t *testing.T) {
+	input := `fun abs(x) {
+  var y = 0;
+  if x < 0 {
+    y = 0 - x;
   } else {
-    x = x - 1;
+    y = x;
   }
-  return x;
+  return y;
+}
+main {
+  return abs(8) + abs(0 - 3);
 }`
-	prog, err := parseCmd(input)
+	prog, err := parseFun(input)
 	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	v, err := EvalPrograma(prog)
-	if err != nil {
-		t.Fatalf("eval unexpected err: %v", err)
-	}
-	if v != 6 {
-		t.Fatalf("eval: got %d want %d", v, 6)
-	}
-}
-
-func TestCmd_While(t *testing.T) {
-	input := `n = 1;
-soma = 0;
-{
-  while n < 5 {
-    soma = soma + n;
-    n = n + 1;
-  }
-  return soma;
-}`
-	prog, err := parseCmd(input)
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	v, err := EvalPrograma(prog)
-	if err != nil {
-		t.Fatalf("eval unexpected err: %v", err)
-	}
-	// soma = 1+2+3+4 = 10
-	if v != 10 {
-		t.Fatalf("eval: got %d want %d", v, 10)
-	}
-}
-
-func TestCmd_ErroVariavelNaoDeclaradaEmDecl(t *testing.T) {
-	prog, err := parseCmd("x = 7 + y;\n{ return x; }")
-	if err != nil {
-		t.Fatalf("unexpected parse err: %v", err)
-	}
-	err = CheckProgram(prog)
-	if err == nil {
-		t.Fatalf("expected semantic error")
-	}
-	if err.Error() != "Erro semantico: variavel 'y' nao declarada" {
-		t.Fatalf("unexpected error: %q", err.Error())
-	}
-}
-
-func TestCmd_ErroVariavelNaoDeclaradaEmResultado(t *testing.T) {
-	prog, err := parseCmd("{ return x; }")
-	if err != nil {
-		t.Fatalf("unexpected parse err: %v", err)
-	}
-	err = CheckProgram(prog)
-	if err == nil {
-		t.Fatalf("expected semantic error")
-	}
-	if err.Error() != "Erro semantico: variavel 'x' nao declarada" {
-		t.Fatalf("unexpected error: %q", err.Error())
-	}
-}
-
-func TestCmd_ErroAtribVariavelNaoDeclarada(t *testing.T) {
-	input := `{
-  x = 5;
-  return x;
-}`
-	prog, err := parseCmd(input)
-	if err != nil {
-		t.Fatalf("unexpected parse err: %v", err)
-	}
-	err = CheckProgram(prog)
-	if err == nil {
-		t.Fatalf("expected semantic error")
-	}
-	if err.Error() != "Erro semantico: variavel 'x' nao declarada" {
-		t.Fatalf("unexpected error: %q", err.Error())
-	}
-}
-
-func TestCmd_Delta(t *testing.T) {
-	// |b^2 - 4ac| com a=1, b=2, c=3 => |4 - 12| = 8
-	input := `a = 1;
-b = 2;
-c = 3;
-delta = b * b - 4 * a * c;
-{
-  if delta < 0 {
-    delta = 0 - delta;
-  } else {
-    delta = delta;
-  }
-  return delta;
-}`
-	prog, err := parseCmd(input)
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
+		t.Fatalf("parse unexpected err: %v", err)
 	}
 	if err := CheckProgram(prog); err != nil {
 		t.Fatalf("semantic err: %v", err)
@@ -376,26 +131,24 @@ delta = b * b - 4 * a * c;
 	if err != nil {
 		t.Fatalf("eval unexpected err: %v", err)
 	}
-	if v != 8 {
-		t.Fatalf("eval: got %d want %d", v, 8)
+	if v != 11 {
+		t.Fatalf("eval: got %d want 11", v)
 	}
 }
 
-func TestCmd_SomaWhile(t *testing.T) {
-	// soma de 1..9 = 45
-	input := `n = 1;
-m = 10;
-soma = 0;
-{
-  while n < m {
-    soma = soma + n;
-    n = n + 1;
-  }
-  return soma;
+func TestEvalProgramFunctionCallingFunction(t *testing.T) {
+	input := `fun dup(x) {
+  return x + x;
+}
+fun quad(x) {
+  return dup(dup(x));
+}
+main {
+  return quad(7);
 }`
-	prog, err := parseCmd(input)
+	prog, err := parseFun(input)
 	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
+		t.Fatalf("parse unexpected err: %v", err)
 	}
 	if err := CheckProgram(prog); err != nil {
 		t.Fatalf("semantic err: %v", err)
@@ -404,7 +157,153 @@ soma = 0;
 	if err != nil {
 		t.Fatalf("eval unexpected err: %v", err)
 	}
-	if v != 45 {
-		t.Fatalf("eval: got %d want %d", v, 45)
+	if v != 28 {
+		t.Fatalf("eval: got %d want 28", v)
+	}
+}
+
+func TestEvalProgramFunctionNoParams(t *testing.T) {
+	input := `fun seed() {
+  return 21;
+}
+main {
+  return seed() + seed();
+}`
+	prog, err := parseFun(input)
+	if err != nil {
+		t.Fatalf("parse unexpected err: %v", err)
+	}
+	if err := CheckProgram(prog); err != nil {
+		t.Fatalf("semantic err: %v", err)
+	}
+	v, err := EvalPrograma(prog)
+	if err != nil {
+		t.Fatalf("eval unexpected err: %v", err)
+	}
+	if v != 42 {
+		t.Fatalf("eval: got %d want 42", v)
+	}
+}
+
+func TestEvalProgramShadowGlobalByParamAndLocal(t *testing.T) {
+	input := `var x = 100;
+fun f(x) {
+  var y = x + 1;
+  return y;
+}
+main {
+  return f(41) + x;
+}`
+	prog, err := parseFun(input)
+	if err != nil {
+		t.Fatalf("parse unexpected err: %v", err)
+	}
+	if err := CheckProgram(prog); err != nil {
+		t.Fatalf("semantic err: %v", err)
+	}
+	v, err := EvalPrograma(prog)
+	if err != nil {
+		t.Fatalf("eval unexpected err: %v", err)
+	}
+	if v != 142 {
+		t.Fatalf("eval: got %d want 142", v)
+	}
+}
+
+func TestEvalProgramRecursiveFactorial(t *testing.T) {
+	input := `fun fact(n) {
+  if n < 2 {
+    n = 1;
+  } else {
+    n = n * fact(n - 1);
+  }
+  return n;
+}
+main {
+  return fact(5);
+}`
+	prog, err := parseFun(input)
+	if err != nil {
+		t.Fatalf("parse unexpected err: %v", err)
+	}
+	if err := CheckProgram(prog); err != nil {
+		t.Fatalf("semantic err: %v", err)
+	}
+	v, err := EvalPrograma(prog)
+	if err != nil {
+		t.Fatalf("eval unexpected err: %v", err)
+	}
+	if v != 120 {
+		t.Fatalf("eval: got %d want 120", v)
+	}
+}
+
+func TestSemanticErrorUndeclaredFunction(t *testing.T) {
+	prog, err := parseFun(`main { return foo(); }`)
+	if err != nil {
+		t.Fatalf("parse unexpected err: %v", err)
+	}
+	err = CheckProgram(prog)
+	if err == nil {
+		t.Fatalf("expected semantic error")
+	}
+	if err.Error() != "Erro semantico: funcao 'foo' nao declarada" {
+		t.Fatalf("unexpected error: %q", err.Error())
+	}
+}
+
+func TestSemanticErrorWrongArity(t *testing.T) {
+	prog, err := parseFun(`fun inc(x) { return x + 1; } main { return inc(1, 2); }`)
+	if err != nil {
+		t.Fatalf("parse unexpected err: %v", err)
+	}
+	err = CheckProgram(prog)
+	if err == nil {
+		t.Fatalf("expected semantic error")
+	}
+	if err.Error() != "Erro semantico: funcao 'inc' esperava 1 parametros, recebeu 2" {
+		t.Fatalf("unexpected error: %q", err.Error())
+	}
+}
+
+func TestSemanticErrorVariableUsedAsFunction(t *testing.T) {
+	prog, err := parseFun(`var foo = 1; main { return foo(); }`)
+	if err != nil {
+		t.Fatalf("parse unexpected err: %v", err)
+	}
+	err = CheckProgram(prog)
+	if err == nil {
+		t.Fatalf("expected semantic error")
+	}
+	if err.Error() != "Erro semantico: funcao 'foo' nao declarada" {
+		t.Fatalf("unexpected error: %q", err.Error())
+	}
+}
+
+func TestSemanticErrorDuplicateLocal(t *testing.T) {
+	prog, err := parseFun(`fun f(x) { var x = 1; return x; } main { return f(3); }`)
+	if err != nil {
+		t.Fatalf("parse unexpected err: %v", err)
+	}
+	err = CheckProgram(prog)
+	if err == nil {
+		t.Fatalf("expected semantic error")
+	}
+	if err.Error() != "Erro semantico: simbolo 'x' ja declarado" {
+		t.Fatalf("unexpected error: %q", err.Error())
+	}
+}
+
+func TestSemanticErrorCallToLaterFunctionRejected(t *testing.T) {
+	prog, err := parseFun(`fun a() { return b(); } fun b() { return 1; } main { return a(); }`)
+	if err != nil {
+		t.Fatalf("parse unexpected err: %v", err)
+	}
+	err = CheckProgram(prog)
+	if err == nil {
+		t.Fatalf("expected semantic error")
+	}
+	if err.Error() != "Erro semantico: funcao 'b' nao declarada" {
+		t.Fatalf("unexpected error: %q", err.Error())
 	}
 }
