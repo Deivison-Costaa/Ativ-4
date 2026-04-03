@@ -30,15 +30,33 @@ func (*Var) expNode() {}
 
 func (v *Var) String() string { return v.Name }
 
+type Call struct {
+	Name string
+	Args []Exp
+}
+
+func (*Call) expNode() {}
+
+func (c *Call) String() string {
+	if len(c.Args) == 0 {
+		return fmt.Sprintf("%s()", c.Name)
+	}
+	parts := make([]string, 0, len(c.Args))
+	for _, arg := range c.Args {
+		parts = append(parts, arg.String())
+	}
+	return fmt.Sprintf("%s(%s)", c.Name, strings.Join(parts, ", "))
+}
+
 type Operator string
 
 const (
-	OpSoma      Operator = "+"
-	OpSub       Operator = "-"
-	OpMult      Operator = "*"
-	OpDiv       Operator = "/"
-	OpMenor     Operator = "<"
-	OpMaior     Operator = ">"
+	OpSoma       Operator = "+"
+	OpSub        Operator = "-"
+	OpMult       Operator = "*"
+	OpDiv        Operator = "/"
+	OpMenor      Operator = "<"
+	OpMaior      Operator = ">"
 	OpIgualIgual Operator = "=="
 )
 
@@ -82,42 +100,76 @@ type AtribCmd struct {
 
 func (*AtribCmd) cmdNode() {}
 
-// --- Declaração e Programa ---
+// --- Declarações e Programa ---
 
-type Decl struct {
+type Decl interface {
+	declNode()
+}
+
+type VarDecl struct {
 	Name string
 	Exp  Exp
 }
 
+func (*VarDecl) declNode() {}
+
+type FunDecl struct {
+	Name   string
+	Params []string
+	Locals []*VarDecl
+	Cmds   []Cmd
+	Result Exp
+}
+
+func (*FunDecl) declNode() {}
+
 type Programa struct {
-	Decls  []*Decl
+	Decls  []Decl
 	Cmds   []Cmd
 	Result Exp
 }
 
 // --- Avaliação (intérprete) ---
 
-func EvalPrograma(prog *Programa) (int, error) {
-	env := map[string]int{}
-	for _, decl := range prog.Decls {
-		v, err := evalExpEnv(decl.Exp, env)
-		if err != nil {
-			return 0, err
-		}
-		env[decl.Name] = v
-	}
-	for _, cmd := range prog.Cmds {
-		if err := evalCmd(cmd, env); err != nil {
-			return 0, err
-		}
-	}
-	return evalExpEnv(prog.Result, env)
+type evalState struct {
+	globals map[string]int
+	funcs   map[string]*FunDecl
 }
 
-func evalCmd(cmd Cmd, env map[string]int) error {
+func EvalPrograma(prog *Programa) (int, error) {
+	st := &evalState{
+		globals: map[string]int{},
+		funcs:   map[string]*FunDecl{},
+	}
+
+	for _, decl := range prog.Decls {
+		switch d := decl.(type) {
+		case *VarDecl:
+			v, err := st.evalExp(d.Exp, nil)
+			if err != nil {
+				return 0, err
+			}
+			st.globals[d.Name] = v
+		case *FunDecl:
+			st.funcs[d.Name] = d
+		default:
+			return 0, fmt.Errorf("Erro de execucao: declaracao desconhecida")
+		}
+	}
+
+	for _, cmd := range prog.Cmds {
+		if err := st.evalCmd(cmd, nil); err != nil {
+			return 0, err
+		}
+	}
+
+	return st.evalExp(prog.Result, nil)
+}
+
+func (st *evalState) evalCmd(cmd Cmd, local map[string]int) error {
 	switch c := cmd.(type) {
 	case *IfCmd:
-		v, err := evalExpEnv(c.Cond, env)
+		v, err := st.evalExp(c.Cond, local)
 		if err != nil {
 			return err
 		}
@@ -128,13 +180,13 @@ func evalCmd(cmd Cmd, env map[string]int) error {
 			branch = c.Else
 		}
 		for _, sub := range branch {
-			if err := evalCmd(sub, env); err != nil {
+			if err := st.evalCmd(sub, local); err != nil {
 				return err
 			}
 		}
 	case *WhileCmd:
 		for {
-			v, err := evalExpEnv(c.Cond, env)
+			v, err := st.evalExp(c.Cond, local)
 			if err != nil {
 				return err
 			}
@@ -142,37 +194,85 @@ func evalCmd(cmd Cmd, env map[string]int) error {
 				break
 			}
 			for _, sub := range c.Body {
-				if err := evalCmd(sub, env); err != nil {
+				if err := st.evalCmd(sub, local); err != nil {
 					return err
 				}
 			}
 		}
 	case *AtribCmd:
-		v, err := evalExpEnv(c.Exp, env)
+		v, err := st.evalExp(c.Exp, local)
 		if err != nil {
 			return err
 		}
-		env[c.Name] = v
+		if local != nil {
+			if _, ok := local[c.Name]; ok {
+				local[c.Name] = v
+				return nil
+			}
+		}
+		if _, ok := st.globals[c.Name]; ok {
+			st.globals[c.Name] = v
+			return nil
+		}
+		return fmt.Errorf("Erro de execucao: variavel '%s' nao definida", c.Name)
 	}
 	return nil
 }
 
-func evalExpEnv(exp Exp, env map[string]int) (int, error) {
+func (st *evalState) evalExp(exp Exp, local map[string]int) (int, error) {
 	switch e := exp.(type) {
 	case *Const:
 		return e.Value, nil
 	case *Var:
-		v, ok := env[e.Name]
+		if local != nil {
+			if v, ok := local[e.Name]; ok {
+				return v, nil
+			}
+		}
+		v, ok := st.globals[e.Name]
 		if !ok {
 			return 0, fmt.Errorf("Erro de execucao: variavel '%s' nao definida", e.Name)
 		}
 		return v, nil
+	case *Call:
+		fn, ok := st.funcs[e.Name]
+		if !ok {
+			return 0, fmt.Errorf("Erro de execucao: funcao '%s' nao definida", e.Name)
+		}
+		if len(e.Args) != len(fn.Params) {
+			return 0, fmt.Errorf("Erro de execucao: funcao '%s' esperava %d parametros, recebeu %d", e.Name, len(fn.Params), len(e.Args))
+		}
+		values := make([]int, len(e.Args))
+		for i := len(e.Args) - 1; i >= 0; i-- {
+			v, err := st.evalExp(e.Args[i], local)
+			if err != nil {
+				return 0, err
+			}
+			values[i] = v
+		}
+		fnLocal := map[string]int{}
+		for i, name := range fn.Params {
+			fnLocal[name] = values[i]
+		}
+		for _, decl := range fn.Locals {
+			v, err := st.evalExp(decl.Exp, fnLocal)
+			if err != nil {
+				return 0, err
+			}
+			fnLocal[decl.Name] = v
+		}
+		for _, cmd := range fn.Cmds {
+			if err := st.evalCmd(cmd, fnLocal); err != nil {
+				return 0, err
+			}
+		}
+		return st.evalExp(fn.Result, fnLocal)
 	case *OpBin:
-		l, err := evalExpEnv(e.Left, env)
+		r, err := st.evalExp(e.Right, local)
 		if err != nil {
 			return 0, err
 		}
-		r, err := evalExpEnv(e.Right, env)
+		l, err := st.evalExp(e.Left, local)
 		if err != nil {
 			return 0, err
 		}
@@ -222,14 +322,18 @@ func TreeString(e Exp) string {
 }
 
 func writeTreeChildren(b *strings.Builder, e Exp, prefix string) {
-	op, ok := e.(*OpBin)
-	if !ok {
-		return
-	}
-	children := []Exp{op.Left, op.Right}
-	for i, child := range children {
-		isTail := i == len(children)-1
-		writeTreeNode(b, child, prefix, isTail)
+	switch n := e.(type) {
+	case *OpBin:
+		children := []Exp{n.Left, n.Right}
+		for i, child := range children {
+			isTail := i == len(children)-1
+			writeTreeNode(b, child, prefix, isTail)
+		}
+	case *Call:
+		for i, child := range n.Args {
+			isTail := i == len(n.Args)-1
+			writeTreeNode(b, child, prefix, isTail)
+		}
 	}
 }
 
@@ -259,6 +363,8 @@ func treeLabel(e Exp) string {
 		return string(n.Op)
 	case *Var:
 		return n.Name
+	case *Call:
+		return n.Name + "()"
 	default:
 		return "<?>"
 	}

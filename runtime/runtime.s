@@ -3,9 +3,10 @@
   #
 
 imprime_num:
+  lea buffer(%rip), %r11
   xor %r9, %r9            # rcx indice, r9 contagem
   mov $20, %rcx
-  movb $10, buffer(%rcx)  # \n no final da string
+  movb $10, (%r11,%rcx,1) # \n no final da string
   dec %rcx
   inc %r9
 
@@ -24,7 +25,7 @@ loop_L0:
   cqo
   idiv %r8  
   addb $0x30, %dl
-  movb %dl, buffer(%rcx)
+  movb %dl, (%r11,%rcx,1)
   dec %rcx
   inc %r9
   or %rax, %rax
@@ -36,14 +37,14 @@ loop_L0:
   jmp print_L0
 
 printzero_L0:
-  movb $0x30, buffer(%rcx)
+  movb $0x30, (%r11,%rcx,1)
   dec %rcx
   inc %r9
 
 print_L0:
   mov $1, %rax            # sys_write
   mov $1, %rdi            # stdout
-  mov $buffer, %rsi       # dados
+  lea buffer(%rip), %rsi  # dados
   inc %rcx
   add %rcx, %rsi
   mov %r9, %rdx           # tamanho
@@ -58,4 +59,3 @@ sair:
 
   .section .bss
   .lcomm buffer, 21
-

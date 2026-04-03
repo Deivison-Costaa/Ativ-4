@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+type functionContext struct {
+	slots      map[string]int
+	localCount int
+}
+
 type CodeGenerator struct {
 	builder    strings.Builder
 	labelCount int
@@ -24,14 +29,15 @@ func (cg *CodeGenerator) Generate(prog *Programa) string {
 	cg.builder.Reset()
 	cg.labelCount = 0
 
-	cg.emit("# Código gerado pelo compilador Cmd")
+	cg.emit("# Codigo gerado pelo compilador Fun")
 	cg.emit("")
 
-	// Seção BSS: variáveis globais
-	if len(prog.Decls) > 0 {
+	if cg.hasGlobalVars(prog) {
 		cg.emit(".section .bss")
 		for _, decl := range prog.Decls {
-			cg.emit(fmt.Sprintf("  .lcomm %s, 8", decl.Name))
+			if d, ok := decl.(*VarDecl); ok {
+				cg.emit(fmt.Sprintf("  .lcomm %s, 8", d.Name))
+			}
 		}
 		cg.emit("")
 	}
@@ -41,28 +47,44 @@ func (cg *CodeGenerator) Generate(prog *Programa) string {
 	cg.emit("")
 	cg.emit("_start:")
 
-	// Inicializar variáveis globais
 	for _, decl := range prog.Decls {
-		cg.emit(fmt.Sprintf("  # %s = ...", decl.Name))
-		cg.genExp(decl.Exp)
-		cg.emit(fmt.Sprintf("  mov %%rax, %s", decl.Name))
+		d, ok := decl.(*VarDecl)
+		if !ok {
+			continue
+		}
+		cg.emit(fmt.Sprintf("  # %s = ...", d.Name))
+		cg.genExp(d.Exp, nil)
+		cg.emit(fmt.Sprintf("  mov %%rax, %s(%%rip)", d.Name))
 	}
 
-	// Comandos do bloco principal
 	for _, cmd := range prog.Cmds {
-		cg.genCmd(cmd)
+		cg.genCmd(cmd, nil)
 	}
-
-	// Expressão de resultado
-	cg.genExp(prog.Result)
+	cg.genExp(prog.Result, nil)
 
 	cg.emit("")
 	cg.emit("  call imprime_num")
 	cg.emit("  call sair")
 	cg.emit("")
-	cg.emit(".include \"runtime/runtime.s\"")
 
+	for _, decl := range prog.Decls {
+		if fn, ok := decl.(*FunDecl); ok {
+			cg.genFunction(fn)
+			cg.emit("")
+		}
+	}
+
+	cg.emit(".include \"runtime/runtime.s\"")
 	return cg.builder.String()
+}
+
+func (cg *CodeGenerator) hasGlobalVars(prog *Programa) bool {
+	for _, decl := range prog.Decls {
+		if _, ok := decl.(*VarDecl); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (cg *CodeGenerator) emit(s string) {
@@ -70,104 +92,149 @@ func (cg *CodeGenerator) emit(s string) {
 	cg.builder.WriteString("\n")
 }
 
-// genCmd despacha geração de código para cada tipo de comando.
-func (cg *CodeGenerator) genCmd(cmd Cmd) {
-	switch c := cmd.(type) {
-	case *IfCmd:
-		cg.genIfCmd(c)
-	case *WhileCmd:
-		cg.genWhileCmd(c)
-	case *AtribCmd:
-		cg.genAtribCmd(c)
+func (cg *CodeGenerator) genFunction(fn *FunDecl) {
+	ctx := buildFunctionContext(fn)
+	cg.emit(fmt.Sprintf("%s:", fn.Name))
+	cg.emit("  push %rbp")
+	if ctx.localCount > 0 {
+		cg.emit(fmt.Sprintf("  sub $%d, %%rsp", ctx.localCount*8))
+	}
+	cg.emit("  mov %rsp, %rbp")
+
+	for _, decl := range fn.Locals {
+		cg.genExp(decl.Exp, ctx)
+		cg.emit(fmt.Sprintf("  mov %%rax, %d(%%rbp)", ctx.slots[decl.Name]))
+	}
+	for _, cmd := range fn.Cmds {
+		cg.genCmd(cmd, ctx)
+	}
+	cg.genExp(fn.Result, ctx)
+
+	if ctx.localCount > 0 {
+		cg.emit(fmt.Sprintf("  add $%d, %%rsp", ctx.localCount*8))
+	}
+	cg.emit("  pop %rbp")
+	cg.emit("  ret")
+}
+
+func buildFunctionContext(fn *FunDecl) *functionContext {
+	slots := map[string]int{}
+	for i, decl := range fn.Locals {
+		slots[decl.Name] = i * 8
+	}
+	baseParamOffset := len(fn.Locals)*8 + 16
+	for i, param := range fn.Params {
+		slots[param] = baseParamOffset + i*8
+	}
+	return &functionContext{
+		slots:      slots,
+		localCount: len(fn.Locals),
 	}
 }
 
-// genIfCmd gera código para: if E { C1 } else { C2 }
-//
-//	<codigo_E>
-//	cmp $0, %rax
-//	jz LfalsoN
-//	<codigo_C1>
-//	jmp LfimN
-//
-// LfalsoN:
-//
-//	<codigo_C2>
-//
-// LfimN:
-func (cg *CodeGenerator) genIfCmd(c *IfCmd) {
+func (cg *CodeGenerator) genCmd(cmd Cmd, ctx *functionContext) {
+	switch c := cmd.(type) {
+	case *IfCmd:
+		cg.genIfCmd(c, ctx)
+	case *WhileCmd:
+		cg.genWhileCmd(c, ctx)
+	case *AtribCmd:
+		cg.genAtribCmd(c, ctx)
+	}
+}
+
+func (cg *CodeGenerator) genIfCmd(c *IfCmd, ctx *functionContext) {
 	n := cg.newLabel()
 	lfalso := fmt.Sprintf("Lfalso%d", n)
 	lfim := fmt.Sprintf("Lfim%d", n)
 
-	cg.genExp(c.Cond)
+	cg.genExp(c.Cond, ctx)
 	cg.emit("  cmp $0, %rax")
 	cg.emit(fmt.Sprintf("  jz %s", lfalso))
 	for _, sub := range c.Then {
-		cg.genCmd(sub)
+		cg.genCmd(sub, ctx)
 	}
 	cg.emit(fmt.Sprintf("  jmp %s", lfim))
 	cg.emit(fmt.Sprintf("%s:", lfalso))
 	for _, sub := range c.Else {
-		cg.genCmd(sub)
+		cg.genCmd(sub, ctx)
 	}
 	cg.emit(fmt.Sprintf("%s:", lfim))
 }
 
-// genWhileCmd gera código para: while E { C }
-//
-// LinicioN:
-//
-//	<codigo_E>
-//	cmp $0, %rax
-//	jz LfimN
-//	<codigo_C>
-//	jmp LinicioN
-//
-// LfimN:
-func (cg *CodeGenerator) genWhileCmd(c *WhileCmd) {
+func (cg *CodeGenerator) genWhileCmd(c *WhileCmd, ctx *functionContext) {
 	n := cg.newLabel()
 	linicio := fmt.Sprintf("Linicio%d", n)
 	lfim := fmt.Sprintf("Lfim%d", n)
 
 	cg.emit(fmt.Sprintf("%s:", linicio))
-	cg.genExp(c.Cond)
+	cg.genExp(c.Cond, ctx)
 	cg.emit("  cmp $0, %rax")
 	cg.emit(fmt.Sprintf("  jz %s", lfim))
 	for _, sub := range c.Body {
-		cg.genCmd(sub)
+		cg.genCmd(sub, ctx)
 	}
 	cg.emit(fmt.Sprintf("  jmp %s", linicio))
 	cg.emit(fmt.Sprintf("%s:", lfim))
 }
 
-// genAtribCmd gera código para: var = exp
-func (cg *CodeGenerator) genAtribCmd(c *AtribCmd) {
-	cg.genExp(c.Exp)
-	cg.emit(fmt.Sprintf("  mov %%rax, %s", c.Name))
+func (cg *CodeGenerator) genAtribCmd(c *AtribCmd, ctx *functionContext) {
+	cg.genExp(c.Exp, ctx)
+	cg.storeVar(c.Name, ctx)
 }
 
-// genExp gera código para uma expressão (resultado fica em %rax).
-func (cg *CodeGenerator) genExp(exp Exp) {
+func (cg *CodeGenerator) genExp(exp Exp, ctx *functionContext) {
 	switch e := exp.(type) {
 	case *Const:
 		cg.emit(fmt.Sprintf("  mov $%d, %%rax", e.Value))
 	case *Var:
-		cg.emit(fmt.Sprintf("  mov %s, %%rax", e.Name))
+		cg.loadVar(e.Name, ctx)
+	case *Call:
+		cg.genCall(e, ctx)
 	case *OpBin:
-		cg.genOpBin(e)
+		cg.genOpBin(e, ctx)
 	}
 }
 
-func (cg *CodeGenerator) genOpBin(op *OpBin) {
+func (cg *CodeGenerator) genCall(call *Call, ctx *functionContext) {
+	for i := len(call.Args) - 1; i >= 0; i-- {
+		cg.genExp(call.Args[i], ctx)
+		cg.emit("  push %rax")
+	}
+	cg.emit(fmt.Sprintf("  call %s", call.Name))
+	if len(call.Args) > 0 {
+		cg.emit(fmt.Sprintf("  add $%d, %%rsp", len(call.Args)*8))
+	}
+}
+
+func (cg *CodeGenerator) loadVar(name string, ctx *functionContext) {
+	if ctx != nil {
+		if offset, ok := ctx.slots[name]; ok {
+			cg.emit(fmt.Sprintf("  mov %d(%%rbp), %%rax", offset))
+			return
+		}
+	}
+	cg.emit(fmt.Sprintf("  mov %s(%%rip), %%rax", name))
+}
+
+func (cg *CodeGenerator) storeVar(name string, ctx *functionContext) {
+	if ctx != nil {
+		if offset, ok := ctx.slots[name]; ok {
+			cg.emit(fmt.Sprintf("  mov %%rax, %d(%%rbp)", offset))
+			return
+		}
+	}
+	cg.emit(fmt.Sprintf("  mov %%rax, %s(%%rip)", name))
+}
+
+func (cg *CodeGenerator) genOpBin(op *OpBin, ctx *functionContext) {
 	switch op.Op {
 	case OpMenor, OpMaior, OpIgualIgual:
-		cg.genComparison(op)
+		cg.genComparison(op, ctx)
 	default:
-		// Operações aritméticas: gera direito primeiro, depois esquerdo
-		cg.genExp(op.Right)
+		cg.genExp(op.Right, ctx)
 		cg.emit("  push %rax")
-		cg.genExp(op.Left)
+		cg.genExp(op.Left, ctx)
 		cg.emit("  pop %rbx")
 		switch op.Op {
 		case OpSoma:
@@ -183,21 +250,10 @@ func (cg *CodeGenerator) genOpBin(op *OpBin) {
 	}
 }
 
-// genComparison gera código para operadores de comparação.
-// Após execução, %rax contém 1 (verdadeiro) ou 0 (falso).
-//
-//	<codigo_right>
-//	push %rax
-//	<codigo_left>
-//	pop %rbx
-//	xor %rcx, %rcx
-//	cmp %rbx, %rax   # calcula left - right, seta flags
-//	set? %cl         # setz/setl/setg conforme operador
-//	mov %rcx, %rax
-func (cg *CodeGenerator) genComparison(op *OpBin) {
-	cg.genExp(op.Right)
+func (cg *CodeGenerator) genComparison(op *OpBin, ctx *functionContext) {
+	cg.genExp(op.Right, ctx)
 	cg.emit("  push %rax")
-	cg.genExp(op.Left)
+	cg.genExp(op.Left, ctx)
 	cg.emit("  pop %rbx")
 	cg.emit("  xor %rcx, %rcx")
 	cg.emit("  cmp %rbx, %rax")

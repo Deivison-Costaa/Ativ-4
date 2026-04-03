@@ -6,24 +6,33 @@ import (
 )
 
 type Parser struct {
-	lex *Lexer
-	cur Token
+	lex  *Lexer
+	cur  Token
+	peek Token
 }
 
 func NewParser(lex *Lexer) (*Parser, error) {
 	p := &Parser{lex: lex}
-	if err := p.advance(); err != nil {
+	first, err := p.lex.NextToken()
+	if err != nil {
 		return nil, err
 	}
+	second, err := p.lex.NextToken()
+	if err != nil {
+		return nil, err
+	}
+	p.cur = first
+	p.peek = second
 	return p, nil
 }
 
 func (p *Parser) advance() error {
+	p.cur = p.peek
 	tok, err := p.lex.NextToken()
 	if err != nil {
 		return err
 	}
-	p.cur = tok
+	p.peek = tok
 	return nil
 }
 
@@ -38,15 +47,18 @@ func (p *Parser) consume(tt TokenType) error {
 	return p.advance()
 }
 
-// ParseProgram: <decl>* '{' <cmd>* 'return' <exp> ';' '}'
+// ParseProgram: <decl>* 'main' '{' <cmd>* 'return' <exp> ';' '}'
 func (p *Parser) ParseProgram() (*Programa, error) {
-	var decls []*Decl
-	for p.cur.Type == TokenIdent {
+	var decls []Decl
+	for p.cur.Type == TokenVar || p.cur.Type == TokenFun {
 		decl, err := p.parseDecl()
 		if err != nil {
 			return nil, err
 		}
 		decls = append(decls, decl)
+	}
+	if err := p.consume(TokenMain); err != nil {
+		return nil, err
 	}
 	if err := p.consume(TokenChaveEsq); err != nil {
 		return nil, err
@@ -74,8 +86,22 @@ func (p *Parser) ParseProgram() (*Programa, error) {
 	return &Programa{Decls: decls, Cmds: cmds, Result: result}, nil
 }
 
-// parseDecl: <ident> '=' <exp> ';'
-func (p *Parser) parseDecl() (*Decl, error) {
+func (p *Parser) parseDecl() (Decl, error) {
+	switch p.cur.Type {
+	case TokenVar:
+		return p.parseVarDecl()
+	case TokenFun:
+		return p.parseFunDecl()
+	default:
+		return nil, p.syntaxError()
+	}
+}
+
+// parseVarDecl: 'var' <ident> '=' <exp> ';'
+func (p *Parser) parseVarDecl() (*VarDecl, error) {
+	if err := p.consume(TokenVar); err != nil {
+		return nil, err
+	}
 	name := p.cur.Lexeme
 	if err := p.consume(TokenIdent); err != nil {
 		return nil, err
@@ -90,7 +116,101 @@ func (p *Parser) parseDecl() (*Decl, error) {
 	if err := p.consume(TokenPontoVirgula); err != nil {
 		return nil, err
 	}
-	return &Decl{Name: name, Exp: exp}, nil
+	return &VarDecl{Name: name, Exp: exp}, nil
+}
+
+// parseFunDecl: 'fun' <ident> '(' <arglist>? ')' '{' <vardecl>* <cmd>* 'return' <exp> ';' '}'
+func (p *Parser) parseFunDecl() (*FunDecl, error) {
+	if err := p.consume(TokenFun); err != nil {
+		return nil, err
+	}
+	name := p.cur.Lexeme
+	if err := p.consume(TokenIdent); err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenParenEsq); err != nil {
+		return nil, err
+	}
+	params, err := p.parseIdentList()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenParenDir); err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenChaveEsq); err != nil {
+		return nil, err
+	}
+	var locals []*VarDecl
+	for p.cur.Type == TokenVar {
+		decl, err := p.parseVarDecl()
+		if err != nil {
+			return nil, err
+		}
+		locals = append(locals, decl)
+	}
+	cmds, err := p.parseCmdList()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenReturn); err != nil {
+		return nil, err
+	}
+	result, err := p.parseExp()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenPontoVirgula); err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenChaveDir); err != nil {
+		return nil, err
+	}
+	return &FunDecl{Name: name, Params: params, Locals: locals, Cmds: cmds, Result: result}, nil
+}
+
+func (p *Parser) parseIdentList() ([]string, error) {
+	if p.cur.Type == TokenParenDir {
+		return nil, nil
+	}
+
+	var names []string
+	for {
+		if p.cur.Type != TokenIdent {
+			return nil, p.syntaxError()
+		}
+		names = append(names, p.cur.Lexeme)
+		if err := p.consume(TokenIdent); err != nil {
+			return nil, err
+		}
+		if p.cur.Type != TokenVirgula {
+			return names, nil
+		}
+		if err := p.consume(TokenVirgula); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func (p *Parser) parseExpList() ([]Exp, error) {
+	if p.cur.Type == TokenParenDir {
+		return nil, nil
+	}
+
+	var exps []Exp
+	for {
+		exp, err := p.parseExp()
+		if err != nil {
+			return nil, err
+		}
+		exps = append(exps, exp)
+		if p.cur.Type != TokenVirgula {
+			return exps, nil
+		}
+		if err := p.consume(TokenVirgula); err != nil {
+			return nil, err
+		}
+	}
 }
 
 // parseCmdList: <cmd>*  (termina quando não é if/while/ident)
@@ -277,10 +397,13 @@ func (p *Parser) parseExpM() (Exp, error) {
 	return esq, nil
 }
 
-// parsePrim: <num> | <var> | '(' <exp> ')'
+// parsePrim: <num> | <ident> | '(' <exp> ')' | <fun>
 func (p *Parser) parsePrim() (Exp, error) {
 	switch p.cur.Type {
 	case TokenIdent:
+		if p.peek.Type == TokenParenEsq {
+			return p.parseCall()
+		}
 		v := &Var{Name: p.cur.Lexeme}
 		if err := p.advance(); err != nil {
 			return nil, err
@@ -311,4 +434,22 @@ func (p *Parser) parsePrim() (Exp, error) {
 	default:
 		return nil, p.syntaxError()
 	}
+}
+
+func (p *Parser) parseCall() (Exp, error) {
+	name := p.cur.Lexeme
+	if err := p.consume(TokenIdent); err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenParenEsq); err != nil {
+		return nil, err
+	}
+	args, err := p.parseExpList()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.consume(TokenParenDir); err != nil {
+		return nil, err
+	}
+	return &Call{Name: name, Args: args}, nil
 }

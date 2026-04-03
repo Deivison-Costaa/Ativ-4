@@ -12,8 +12,8 @@ import (
 func main() {
 	outputFile := flag.String("o", "", "Arquivo de saída (padrão: mesmo nome com extensão .s)")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Uso: cmd [-o arquivo.s] <arquivo.ev>\n")
-		fmt.Fprintf(os.Stderr, "Compilador Cmd - Gera código assembly x86-64\n\n")
+		fmt.Fprintf(os.Stderr, "Uso: cmd [-o arquivo.s] <arquivo.fun|arquivo.ev>\n")
+		fmt.Fprintf(os.Stderr, "Compilador Fun - Gera codigo assembly x86-64\n\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()

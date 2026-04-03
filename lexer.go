@@ -3,6 +3,9 @@ package main
 import "fmt"
 
 var keywords = map[string]TokenType{
+	"fun":    TokenFun,
+	"var":    TokenVar,
+	"main":   TokenMain,
 	"if":     TokenIf,
 	"else":   TokenElse,
 	"while":  TokenWhile,
@@ -48,6 +51,9 @@ func (l *Lexer) NextToken() (Token, error) {
 		case '}':
 			l.pos++
 			return Token{Type: TokenChaveDir, Lexeme: "}", Pos: start}, nil
+		case ',':
+			l.pos++
+			return Token{Type: TokenVirgula, Lexeme: ",", Pos: start}, nil
 		case '+':
 			l.pos++
 			return Token{Type: TokenSoma, Lexeme: "+", Pos: start}, nil
