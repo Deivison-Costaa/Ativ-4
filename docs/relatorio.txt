@@ -1,0 +1,91 @@
+Atividade 11 - Compilador Fun (Funções)
+=======================================
+
+O projeto implementa um compilador para a linguagem Fun, gerando assembly x86-64 para Linux.
+Nesta reorganização, o comportamento do compilador foi preservado, mas a estrutura do
+repositório foi separada por responsabilidade para facilitar manutenção, testes e leitura.
+Além disso, a linguagem passou a suportar booleanos com `true`, `false`, `and`, `or`
+e `not`, com avaliação em curto-circuito para os operadores lógicos binários.
+Também foram adicionados o operador de resto `%`, os comparadores `<=`, `>=` e `!=`,
+e as atribuições compostas `+=`, `-=`, `*=`, `/=` e `%=`.
+
+Estrutura atual:
+
+1. CLI
+   - `cmd/funcc/main.go`
+   - Responsável apenas por leitura de entrada, parse, checagem semântica e emissão do arquivo `.s`
+
+2. NÚCLEO DA LINGUAGEM
+   - `internal/fun/`
+   - Define tokens, AST e tipos compartilhados entre as fases do compilador
+
+3. FASES DO COMPILADOR
+   - `internal/lexer/`   : análise léxica
+   - `internal/parser/`  : análise sintática
+   - `internal/semantic/`: validação semântica
+   - `internal/codegen/` : geração de assembly
+   - `internal/interpreter/`: interpretação usada para validação de comportamento
+
+4. TESTES E FIXTURES
+   - `testdata/fun/positive/`: programas válidos com saída esperada
+   - `testdata/fun/negative/`: programas que devem falhar na semântica
+   - `testdata/legacy/cmd/` : arquivos `.ev` antigos mantidos como referência histórica
+   - `internal/integration/`: testes de pipeline com os fixtures reais
+
+5. SUPORTE
+   - `runtime/runtime.s`  : rotinas auxiliares usadas pelo assembly gerado
+   - `scripts/run_tests.sh` : testes integrados em diretório temporário
+   - `scripts/run_examples.ps1` : geração de exemplos sem sujar o repositório
+
+Benefícios da reorganização:
+
+- a raiz do projeto deixa de misturar código-fonte, binários e artefatos gerados
+- cada fase do compilador passa a ter seu próprio pacote e seus próprios testes
+- os testes semânticos, de interpretação e de geração de código ficam separados
+- os scripts deixam de escrever `.s`, `.o` e executáveis em arquivos versionados
+- binários e saídas temporárias passam a ser ignorados via `.gitignore`
+
+Extensão booleana implementada:
+
+- `true` e `false` são aceitos como literais da linguagem
+- booleanos são representados internamente como `1` e `0`
+- `not` é suportado em expressões e condições
+- `and` e `or` usam short-circuit no intérprete e no código gerado
+- a convenção de verdade em `if` e `while` continua sendo `0 = falso` e `!= 0 = verdadeiro`
+
+Extensões aritméticas e relacionais implementadas:
+
+- `%` foi incluído no mesmo nível de precedência de `*` e `/`
+- `<=`, `>=` e `!=` completam o conjunto principal de comparações da linguagem
+- todas as comparações continuam retornando `0` ou `1`
+- `+=`, `-=`, `*=`, `/=` e `%=` são dessugarizados no parser para atribuições simples
+- o gerador de código usa `idiv` + `%rdx` para `%`
+- o gerador de código usa `setle`, `setge` e `setne` para os novos comparadores
+
+Como executar:
+
+  go test ./...
+
+No Linux/WSL:
+
+  sh scripts/run_tests.sh
+
+Compilação manual da CLI:
+
+  go build -o ./bin/funcc ./cmd/funcc
+
+Exemplo manual:
+
+  ./bin/funcc testdata/fun/positive/fact.fun
+  ./bin/funcc -o /tmp/fact.s testdata/fun/positive/fact.fun
+
+Saída esperada para `fact.fun`:
+
+  120
+
+Fixtures adicionais relevantes:
+
+- `testdata/fun/positive/mod.fun`
+- `testdata/fun/positive/compare.fun`
+- `testdata/fun/positive/compound.fun`
+- `testdata/fun/positive/combined.fun`

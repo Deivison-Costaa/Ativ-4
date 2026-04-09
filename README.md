@@ -1,72 +1,45 @@
-# Atividade 11 - Compilador Fun (Funções)
+# Compilador Fun
 
 Compilador para a linguagem **Fun**, gerando código **assembly x86-64** para Linux.
 
-A linguagem Fun estende a linguagem Cmd com:
-- declarações globais com `var`
-- bloco principal marcado por `main`
-- declaração de funções com `fun`
-- parâmetros formais e reais
-- variáveis locais dentro de funções
-- chamadas de função como expressões
-- escopo local com precedência sobre variáveis globais
+Extensões atuais:
+- booleanos com `true`, `false`, `and`, `or` e `not`, representados em tempo de execução como `0/1`
+- resto de divisão com `%`
+- comparadores `<=`, `>=` e `!=`
+- atribuição composta com `+=`, `-=`, `*=`, `/=` e `%=`
 
-## Gramática
+## Estrutura
 
-```txt
-<programa> ::= <decl>* 'main' '{' <cmd>* 'return' <exp> ';' '}'
-<decl>     ::= <vardecl> | <fundecl>
-<fundecl>  ::= 'fun' <ident> '(' <arglist>? ')'
-               '{' <vardecl>* <cmd>* 'return' <exp> ';' '}'
-<arglist>  ::= <ident> | <ident> ',' <arglist>
-<vardecl>  ::= 'var' <ident> '=' <exp> ';'
-<cmd>      ::= <if> | <while> | <atrib>
-<if>       ::= 'if' <exp> '{' <cmd>* '}' 'else' '{' <cmd>* '}'
-<while>    ::= 'while' <exp> '{' <cmd>* '}'
-<atrib>    ::= <ident> '=' <exp> ';'
-<exp>      ::= <exp_a> (('<' | '>' | '==') <exp_a>)*
-<exp_a>    ::= <exp_m> (('+' | '-') <exp_m>)*
-<exp_m>    ::= <prim> (('*' | '/') <prim>)*
-<prim>     ::= <num> | <ident> | '(' <exp> ')' | <fun>
-<fun>      ::= <ident> '(' <params>? ')'
-<params>   ::= <exp> | <exp> ',' <params>
-```
-
-## Componentes
-
-| Arquivo | Descrição |
+| Caminho | Descrição |
 |---------|-----------|
-| `token.go` | Tipos de tokens da linguagem Fun |
-| `lexer.go` | Analisador léxico |
-| `parser.go` | Parser descendente recursivo com lookahead para diferenciar variável/chamada |
-| `ast.go` | AST, intérprete e suporte a escopos locais |
-| `semantic.go` | Verificação semântica de variáveis, funções e aridade |
-| `codegen.go` | Geração de assembly x86-64 com prólogo/epílogo de funções |
+| `cmd/funcc` | CLI do compilador |
+| `internal/fun` | Tokens, AST e tipos centrais da linguagem |
+| `internal/lexer` | Analisador léxico |
+| `internal/parser` | Parser descendente recursivo |
+| `internal/semantic` | Verificação semântica |
+| `internal/interpreter` | Intérprete usado pelos testes |
+| `internal/codegen` | Geração de assembly x86-64 |
+| `internal/integration` | Testes de pipeline usando fixtures |
 | `runtime/runtime.s` | Funções auxiliares `imprime_num` e `sair` |
-| `tests/` | Programas de teste para Cmd e Fun |
+| `testdata/fun` | Fixtures positivos e negativos da linguagem Fun |
+| `testdata/legacy/cmd` | Casos `.ev` antigos preservados como referência |
+| `scripts/` | Scripts de apoio para exemplos e testes integrados |
+| `docs/relatorio.txt` | Relatório do projeto |
 
 ## Como usar
 
 ### Compilar o compilador
 
 ```bash
-go build -o cmd .
+go build -o ./bin/funcc ./cmd/funcc
 ```
 
-### Compilar um programa Fun
+### Gerar assembly para um programa Fun
 
 ```bash
-./cmd tests/abs.fun
-./cmd -o tests/abs.s tests/abs.fun
-echo 'main { return 42; }' | ./cmd -o /tmp/test.s -
-```
-
-### Montar e executar no Linux/WSL
-
-```bash
-as -o tests/abs.o tests/abs.s
-ld -o tests/abs tests/abs.o
-./tests/abs
+./bin/funcc testdata/fun/positive/abs.fun
+./bin/funcc -o /tmp/abs.s testdata/fun/positive/abs.fun
+echo 'main { return 42; }' | ./bin/funcc -o /tmp/test.s -
 ```
 
 ### Executar testes unitários
@@ -75,38 +48,55 @@ ld -o tests/abs tests/abs.o
 go test ./...
 ```
 
-### Executar testes integrados no WSL
+### Executar testes integrados no Linux/WSL
 
 ```bash
-sh run_tests.sh
+sh scripts/run_tests.sh
 ```
 
-O script `run_tests.sh` compila o compilador, gera assembly para programas `.fun`, monta, linka e executa os binários no ambiente Linux/WSL.
+O script compila a CLI em um diretório temporário, valida `go test ./...`, gera assembly para os fixtures `.fun`, monta, linka e executa os binários sem sujar arquivos versionados.
 
-## Programas de teste Fun
+## Operadores adicionais
+
+- `true` gera valor `1`
+- `false` gera valor `0`
+- `not x` retorna `1` quando `x` é falso
+- `a and b` e `a or b` fazem short-circuit
+- `if` e `while` continuam usando a convenção `0 = falso`, `!= 0 = verdadeiro`
+- `a % b` calcula o resto da divisão inteira
+- `a <= b`, `a >= b` e `a != b` retornam `0` ou `1`
+- `x += y`, `x -= y`, `x *= y`, `x /= y` e `x %= y` são dessugarizados para `x = x op y`
+
+## Fixtures Fun
+
+### Positivos
 
 | Arquivo | Descrição | Saída esperada |
 |---------|-----------|----------------|
-| `tests/abs.fun` | Função com variável local | `11` |
-| `tests/noargs.fun` | Função sem parâmetros | `42` |
-| `tests/chain.fun` | Função chamando outra função | `28` |
-| `tests/shadow.fun` | Sombra de global por parâmetro/local | `142` |
-| `tests/fact.fun` | Recursão direta (fatorial) | `120` |
-| `tests/err_fun_undef.fun` | Erro semântico: função não declarada | — |
-| `tests/err_fun_arity.fun` | Erro semântico: aridade incorreta | — |
+| `testdata/fun/positive/abs.fun` | Função com variável local | `11` |
+| `testdata/fun/positive/bool_func.fun` | Função retornando condição booleana | `1` |
+| `testdata/fun/positive/bool_if.fun` | Uso de `if` com `and/not` | `1` |
+| `testdata/fun/positive/bool_short_or.fun` | Short-circuit de `or` com efeito colateral | `0` |
+| `testdata/fun/positive/bool_while.fun` | Uso de `while` com `or/not` | `3` |
+| `testdata/fun/positive/noargs.fun` | Função sem parâmetros | `42` |
+| `testdata/fun/positive/chain.fun` | Função chamando outra função | `28` |
+| `testdata/fun/positive/mod.fun` | Uso do operador de resto `%` | `1` |
+| `testdata/fun/positive/compare.fun` | Comparadores `<=`, `>=`, `!=` | `1` |
+| `testdata/fun/positive/compound.fun` | Atribuições compostas em globais e locais | `1` |
+| `testdata/fun/positive/combined.fun` | Combinação de booleanos, `%`, comparações e atribuição composta | `1` |
+| `testdata/fun/positive/shadow.fun` | Sombra de global por parâmetro/local | `142` |
+| `testdata/fun/positive/fact.fun` | Recursão direta (fatorial) | `120` |
 
-## Convenção de chamada
+### Negativos
 
-- Argumentos são empilhados da direita para a esquerda.
-- A chamada usa `call nome`.
-- O chamador remove os argumentos da pilha após o retorno.
-- O retorno da função é sempre colocado em `%rax`.
-- Cada função usa `%rbp` como frame pointer.
-- Variáveis locais e parâmetros são acessados com deslocamento relativo a `%rbp`.
+| Arquivo | Descrição |
+|---------|-----------|
+| `testdata/fun/negative/err_fun_undef.fun` | Erro semântico: função não declarada |
+| `testdata/fun/negative/err_fun_arity.fun` | Erro semântico: aridade incorreta |
 
 ## Requisitos
 
 - Go 1.22+
 - GNU Assembler (`as`)
 - GNU Linker (`ld`)
-- Linux x86-64 ou WSL para execução dos binários gerados
+- Linux x86-64 ou WSL para executar os binários gerados
