@@ -1,0 +1,10 @@
+/bin/
+/coverage.out
+/funcc
+*.exe
+*.o
+*.obj
+*.out
+*.s
+*.test
+!runtime/runtime.s
